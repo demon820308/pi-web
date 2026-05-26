@@ -528,6 +528,27 @@ function AudioViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
   );
 }
 
+function isLocalOrPrivateHost(hostname: string): boolean {
+  if (!hostname) return true;
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]") {
+    return true;
+  }
+  const ipv4Pattern = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+  const match = hostname.match(ipv4Pattern);
+  if (match) {
+    const [, p1, p2] = match.map(Number);
+    if (p1 === 10) return true;
+    if (p1 === 172 && p2 >= 16 && p2 <= 31) return true;
+    if (p1 === 192 && p2 === 168) return true;
+    if (p1 === 169 && p2 === 254) return true;
+    if (p1 === 127) return true;
+  }
+  if (hostname.startsWith("[fe8") || hostname.startsWith("[fc") || hostname.startsWith("[fd") || hostname.startsWith("fe8") || hostname.startsWith("fc") || hostname.startsWith("fd")) {
+    return true;
+  }
+  return false;
+}
+
 function PptxViewer({ filePath, cwd }: Props) {
   const [watching, setWatching] = useState(false);
   const [bust, setBust] = useState(0);
@@ -574,10 +595,10 @@ function PptxViewer({ filePath, cwd }: Props) {
 
   const formatSizeStr = size != null ? formatSize(size) : null;
 
-  // Google Docs Viewer URL for PPT preview
-  // Note: This requires the file to be publicly accessible
-  // For local files, we'll show a download link instead
-  const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+  // Google Docs / Office Online Viewer URL for PPT preview
+  // Note: This requires the file to be publicly accessible.
+  // For local or private network hosts, Microsoft/Google cannot access the file, so we'll show a download link instead.
+  const isLocal = typeof window !== "undefined" && isLocalOrPrivateHost(window.location.hostname);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -631,59 +652,47 @@ function PptxViewer({ filePath, cwd }: Props) {
         {error ? (
           <div style={{ color: "#f87171", fontSize: 13 }}>{error}</div>
         ) : isLocal ? (
-          // For local files, show preview with iframe using Google Docs Viewer
-          <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+          // For local/private files, show download link and helpful explanation
+          <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 16 }}>
             <div style={{ 
-              padding: 24, 
-              background: "var(--bg)", 
-              borderRadius: 8, 
+              padding: "32px 24px", 
+              background: "var(--bg-panel)", 
+              borderRadius: 12, 
               border: "1px solid var(--border)",
               textAlign: "center",
-              maxWidth: 500
+              maxWidth: 480,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.08)"
             }}>
-              <div style={{ fontSize: 48, marginBottom: 16 }}>📊</div>
-              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
+              <div style={{ fontSize: 54, marginBottom: 16 }}>📊</div>
+              <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
                 PowerPoint Presentation
               </div>
-              <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>
+              <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 24 }}>
                 {ext.toUpperCase()} file • {formatSizeStr || "Unknown size"}
               </div>
-              <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center" }}>
                 <a
                   href={src}
                   download
                   style={{
-                    padding: "8px 16px",
+                    padding: "10px 24px",
                     background: "var(--accent)",
                     color: "white",
                     borderRadius: 6,
                     textDecoration: "none",
-                    fontSize: 13,
+                    fontSize: 14,
                     fontWeight: 500,
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6
                   }}
                 >
-                  ⬇️ Download
-                </a>
-                <a
-                  href={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(window.location.origin + src)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    padding: "8px 16px",
-                    background: "var(--bg-hover)",
-                    color: "var(--text)",
-                    borderRadius: 6,
-                    textDecoration: "none",
-                    fontSize: 13,
-                    fontWeight: 500,
-                    border: "1px solid var(--border)",
-                  }}
-                >
-                  👁️ Preview Online
+                  ⬇️ Download Presentation
                 </a>
               </div>
-              <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 12 }}>
-                Tip: Click "Preview Online" to view in browser (requires internet)
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 24, lineHeight: 1.5, textAlign: "left", background: "var(--bg)", padding: 12, borderRadius: 6, border: "1px solid var(--border)" }}>
+                💡 <strong>Notice:</strong> Online preview is only available when the server is deployed on a public domain name. Because this server is running on a local or private network address, external viewer services (like Microsoft Office Online) cannot access and render the file. Please download it to view locally.
               </div>
             </div>
           </div>
