@@ -549,6 +549,251 @@ function isLocalOrPrivateHost(hostname: string): boolean {
   return false;
 }
 
+function LocalPptxViewer({ filePath, src, formatSizeStr, ext }: { filePath: string; src: string; formatSizeStr: string | null; ext: string }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [viewer, setViewer] = useState<any>(null);
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [totalSlides, setTotalSlides] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    let localViewer: any = null;
+
+    async function init() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Fetch ArrayBuffer of the PPTX file
+        const response = await fetch(src);
+        if (!response.ok) {
+          throw new Error(`Failed to load file: ${response.statusText}`);
+        }
+        const arrayBuffer = await response.arrayBuffer();
+
+        if (!active) return;
+
+        // Dynamically import pptxviewjs client-side to prevent SSR issues
+        const { PPTXViewer } = await import("pptxviewjs");
+        
+        if (!active) return;
+
+        localViewer = new PPTXViewer({
+          canvas: canvasRef.current,
+          slideSizeMode: "fit",
+        });
+
+        await localViewer.loadFile(new Uint8Array(arrayBuffer));
+
+        if (!active) return;
+
+        setViewer(localViewer);
+        setTotalSlides(localViewer.getSlideCount());
+        setCurrentSlide(localViewer.getCurrentSlideIndex());
+        
+        // Render first slide
+        await localViewer.render();
+        setLoading(false);
+      } catch (err: any) {
+        console.error("PPTX render error:", err);
+        if (active) {
+          setError(err.message || "Failed to render PowerPoint presentation");
+          setLoading(false);
+        }
+      }
+    }
+
+    init();
+
+    return () => {
+      active = false;
+      if (localViewer) {
+        try {
+          localViewer.destroy();
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
+  }, [src]);
+
+  const handleNext = async () => {
+    if (viewer && currentSlide < totalSlides - 1) {
+      setLoading(true);
+      try {
+        await viewer.nextSlide();
+        setCurrentSlide(viewer.getCurrentSlideIndex());
+      } catch (e) {
+        // ignore
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handlePrev = async () => {
+    if (viewer && currentSlide > 0) {
+      setLoading(true);
+      try {
+        await viewer.previousSlide();
+        setCurrentSlide(viewer.getCurrentSlideIndex());
+      } catch (e) {
+        // ignore
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden" }}>
+      {/* PPT navigation toolbar */}
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "6px 16px",
+        background: "var(--bg)",
+        borderBottom: "1px solid var(--border)",
+        flexShrink: 0,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>
+            {totalSlides > 0 ? `Slide ${currentSlide + 1} of ${totalSlides}` : "Loading slides..."}
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button
+            onClick={handlePrev}
+            disabled={loading || currentSlide === 0}
+            style={{
+              padding: "4px 10px",
+              fontSize: 11,
+              borderRadius: 4,
+              border: "1px solid var(--border)",
+              background: "var(--bg-hover)",
+              color: "var(--text)",
+              cursor: (loading || currentSlide === 0) ? "default" : "pointer",
+              opacity: (loading || currentSlide === 0) ? 0.5 : 1,
+            }}
+          >
+            ◀ Prev
+          </button>
+          <button
+            onClick={handleNext}
+            disabled={loading || currentSlide === totalSlides - 1}
+            style={{
+              padding: "4px 10px",
+              fontSize: 11,
+              borderRadius: 4,
+              border: "1px solid var(--border)",
+              background: "var(--bg-hover)",
+              color: "var(--text)",
+              cursor: (loading || currentSlide === totalSlides - 1) ? "default" : "pointer",
+              opacity: (loading || currentSlide === totalSlides - 1) ? 0.5 : 1,
+            }}
+          >
+            Next ▶
+          </button>
+          <a
+            href={src}
+            download
+            title="Download original file"
+            style={{
+              padding: "4px 10px",
+              fontSize: 11,
+              borderRadius: 4,
+              border: "1px solid var(--border)",
+              background: "var(--accent)",
+              color: "white",
+              textDecoration: "none",
+              fontWeight: 500,
+              marginLeft: 6
+            }}
+          >
+            ⬇️ Download
+          </a>
+        </div>
+      </div>
+
+      {/* Main rendering area */}
+      <div style={{
+        flex: 1,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        overflow: "auto",
+        padding: 16,
+        position: "relative"
+      }}>
+        {loading && (
+          <div style={{
+            position: "absolute",
+            zIndex: 10,
+            background: "rgba(0,0,0,0.05)",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "var(--text-muted)",
+            fontSize: 13
+          }}>
+            Rendering slide...
+          </div>
+        )}
+        
+        {error ? (
+          <div style={{
+            padding: 24,
+            background: "var(--bg-panel)",
+            borderRadius: 8,
+            border: "1px solid var(--border)",
+            textAlign: "center",
+            maxWidth: 400
+          }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>⚠️</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#f87171", marginBottom: 8 }}>
+              Local Preview Failed
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
+              {error}
+            </div>
+            <a
+              href={src}
+              download
+              style={{
+                padding: "6px 16px",
+                background: "var(--accent)",
+                color: "white",
+                borderRadius: 4,
+                textDecoration: "none",
+                fontSize: 12,
+                fontWeight: 500,
+                display: "inline-block"
+              }}
+            >
+              ⬇️ Download File
+            </a>
+          </div>
+        ) : (
+          <canvas
+            ref={canvasRef}
+            style={{
+              maxWidth: "100%",
+              maxHeight: "100%",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              background: "white",
+              display: loading && totalSlides === 0 ? "none" : "block"
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PptxViewer({ filePath, cwd }: Props) {
   const [watching, setWatching] = useState(false);
   const [bust, setBust] = useState(0);
@@ -644,58 +889,12 @@ function PptxViewer({ filePath, cwd }: Props) {
           background: "var(--bg-panel)",
           display: "flex",
           flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: 16,
         }}
       >
         {error ? (
-          <div style={{ color: "#f87171", fontSize: 13 }}>{error}</div>
+          <div style={{ color: "#f87171", fontSize: 13, padding: 16 }}>{error}</div>
         ) : isLocal ? (
-          // For local/private files, show download link and helpful explanation
-          <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 16 }}>
-            <div style={{ 
-              padding: "32px 24px", 
-              background: "var(--bg-panel)", 
-              borderRadius: 12, 
-              border: "1px solid var(--border)",
-              textAlign: "center",
-              maxWidth: 480,
-              boxShadow: "0 4px 12px rgba(0,0,0,0.08)"
-            }}>
-              <div style={{ fontSize: 54, marginBottom: 16 }}>📊</div>
-              <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
-                PowerPoint Presentation
-              </div>
-              <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 24 }}>
-                {ext.toUpperCase()} file • {formatSizeStr || "Unknown size"}
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center" }}>
-                <a
-                  href={src}
-                  download
-                  style={{
-                    padding: "10px 24px",
-                    background: "var(--accent)",
-                    color: "white",
-                    borderRadius: 6,
-                    textDecoration: "none",
-                    fontSize: 14,
-                    fontWeight: 500,
-                    boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6
-                  }}
-                >
-                  ⬇️ Download Presentation
-                </a>
-              </div>
-              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 24, lineHeight: 1.5, textAlign: "left", background: "var(--bg)", padding: 12, borderRadius: 6, border: "1px solid var(--border)" }}>
-                💡 <strong>Notice:</strong> Online preview is only available when the server is deployed on a public domain name. Because this server is running on a local or private network address, external viewer services (like Microsoft Office Online) cannot access and render the file. Please download it to view locally.
-              </div>
-            </div>
-          </div>
+          <LocalPptxViewer filePath={filePath} src={src} formatSizeStr={formatSizeStr} ext={ext} />
         ) : (
           // For remote files, use iframe with Google Docs Viewer
           <iframe
