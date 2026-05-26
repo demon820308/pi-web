@@ -52,6 +52,26 @@ function getAudioMime(filePath: string): string | null {
   return AUDIO_EXT_TO_MIME[getExt(filePath)] ?? null;
 }
 
+const BINARY_EXT_TO_MIME: Record<string, string> = {
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ppt: "application/vnd.ms-powerpoint",
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  doc: "application/msword",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xls: "application/vnd.ms-excel",
+  mp4: "video/mp4",
+  webm: "video/webm",
+  ogg: "video/ogg",
+  zip: "application/zip",
+  tar: "application/x-tar",
+  gz: "application/gzip",
+};
+
+function getBinaryMime(filePath: string): string | null {
+  return BINARY_EXT_TO_MIME[getExt(filePath)] ?? null;
+}
+
 const EXT_TO_LANGUAGE: Record<string, string> = {
   ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
   mjs: "javascript", cjs: "javascript", py: "python", rb: "ruby",
@@ -279,6 +299,10 @@ export async function GET(
       const audioMime = getAudioMime(filePath);
       if (audioMime) {
         return streamFile(filePath, stat, audioMime, request.headers.get("range"));
+      }
+      const binaryMime = getBinaryMime(filePath);
+      if (binaryMime) {
+        return streamFile(filePath, stat, binaryMime, request.headers.get("range"));
       }
       if (stat.size > TEXT_PREVIEW_MAX_BYTES) {
         return NextResponse.json({ error: "File too large for preview (>256KB)" }, { status: 413 });
