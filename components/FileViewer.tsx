@@ -781,8 +781,9 @@ function LocalPptxViewer({ filePath, src, formatSizeStr, ext }: { filePath: stri
           <canvas
             ref={canvasRef}
             style={{
-              maxWidth: "100%",
-              maxHeight: "100%",
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
               boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
               background: "white",
               display: loading && totalSlides === 0 ? "none" : "block"
