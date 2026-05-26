@@ -22,6 +22,7 @@ interface FileData {
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"]);
 const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "oga", "opus", "m4a", "aac", "flac", "weba", "webm"]);
+const PPTX_EXTS = new Set(["pptx", "ppt"]);
 
 function isImagePath(filePath: string): boolean {
   const base = getFileName(filePath);
@@ -33,6 +34,12 @@ function isAudioPath(filePath: string): boolean {
   const base = getFileName(filePath);
   const ext = base.toLowerCase().split(".").pop() ?? "";
   return AUDIO_EXTS.has(ext);
+}
+
+function isPptxPath(filePath: string): boolean {
+  const base = getFileName(filePath);
+  const ext = base.toLowerCase().split(".").pop() ?? "";
+  return PPTX_EXTS.has(ext);
 }
 
 type DiffLine =
@@ -521,12 +528,187 @@ function AudioViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
   );
 }
 
+function PptxViewer({ filePath, cwd }: Props) {
+  const [watching, setWatching] = useState(false);
+  const [bust, setBust] = useState(0);
+  const [size, setSize] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const esRef = useRef<EventSource | null>(null);
+
+  const ext = getFileName(filePath).toLowerCase().split(".").pop() ?? "";
+
+  useEffect(() => {
+    setBust(0);
+    setSize(null);
+    setError(null);
+    setWatching(false);
+
+    if (esRef.current) {
+      esRef.current.close();
+      esRef.current = null;
+    }
+
+    const encoded = encodeFilePathForApi(filePath);
+    const es = new EventSource(`/api/files/${encoded}?type=watch`);
+    esRef.current = es;
+
+    es.addEventListener("connected", () => setWatching(true));
+    es.addEventListener("change", (e) => {
+      try {
+        const d = JSON.parse((e as MessageEvent).data) as { size?: number };
+        if (typeof d.size === "number") setSize(d.size);
+      } catch { /* ignore */ }
+      setBust((b) => b + 1);
+    });
+    es.addEventListener("error", () => setWatching(false));
+    es.onerror = () => setWatching(false);
+
+    return () => {
+      es.close();
+      esRef.current = null;
+    };
+  }, [filePath]);
+
+  const encoded = encodeFilePathForApi(filePath);
+  const src = `/api/files/${encoded}?type=read${bust ? `&v=${bust}` : ""}`;
+
+  const formatSizeStr = size != null ? formatSize(size) : null;
+
+  // Google Docs Viewer URL for PPT preview
+  // Note: This requires the file to be publicly accessible
+  // For local files, we'll show a download link instead
+  const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "4px 16px",
+          borderBottom: "1px solid var(--border)",
+          fontSize: 11,
+          color: "var(--text-dim)",
+          background: "var(--bg)",
+          flexShrink: 0,
+        }}
+      >
+        <span style={{ fontFamily: "var(--font-mono)" }} title={filePath}>
+          {getRelativeFilePath(filePath, cwd)}
+        </span>
+        <span style={{ marginLeft: "auto" }}>{ext.toUpperCase()}</span>
+        {formatSizeStr && <span>{formatSizeStr}</span>}
+        <span
+          title={watching ? "Live sync active" : "Not watching"}
+          style={{ display: "flex", alignItems: "center", gap: 4, color: watching ? "#4ade80" : "var(--text-dim)" }}
+        >
+          <span
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              background: watching ? "#4ade80" : "var(--border)",
+              display: "inline-block",
+              boxShadow: watching ? "0 0 4px #4ade80" : "none",
+            }}
+          />
+          {watching ? "live" : "static"}
+        </span>
+      </div>
+      <div
+        style={{
+          flex: 1,
+          overflow: "auto",
+          background: "var(--bg-panel)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 16,
+        }}
+      >
+        {error ? (
+          <div style={{ color: "#f87171", fontSize: 13 }}>{error}</div>
+        ) : isLocal ? (
+          // For local files, show preview with iframe using Google Docs Viewer
+          <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+            <div style={{ 
+              padding: 24, 
+              background: "var(--bg)", 
+              borderRadius: 8, 
+              border: "1px solid var(--border)",
+              textAlign: "center",
+              maxWidth: 500
+            }}>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>📊</div>
+              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
+                PowerPoint Presentation
+              </div>
+              <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>
+                {ext.toUpperCase()} file • {formatSizeStr || "Unknown size"}
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                <a
+                  href={src}
+                  download
+                  style={{
+                    padding: "8px 16px",
+                    background: "var(--accent)",
+                    color: "white",
+                    borderRadius: 6,
+                    textDecoration: "none",
+                    fontSize: 13,
+                    fontWeight: 500,
+                  }}
+                >
+                  ⬇️ Download
+                </a>
+                <a
+                  href={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(window.location.origin + src)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    padding: "8px 16px",
+                    background: "var(--bg-hover)",
+                    color: "var(--text)",
+                    borderRadius: 6,
+                    textDecoration: "none",
+                    fontSize: 13,
+                    fontWeight: 500,
+                    border: "1px solid var(--border)",
+                  }}
+                >
+                  👁️ Preview Online
+                </a>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 12 }}>
+                Tip: Click "Preview Online" to view in browser (requires internet)
+              </div>
+            </div>
+          </div>
+        ) : (
+          // For remote files, use iframe with Google Docs Viewer
+          <iframe
+            src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(window.location.origin + src)}`}
+            style={{ width: "100%", height: "100%", border: "none" }}
+            title="PPT Preview"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function FileViewer({ filePath, cwd }: Props) {
   if (isImagePath(filePath)) {
     return <ImageViewer filePath={filePath} cwd={cwd} />;
   }
   if (isAudioPath(filePath)) {
     return <AudioViewer filePath={filePath} cwd={cwd} />;
+  }
+  if (isPptxPath(filePath)) {
+    return <PptxViewer filePath={filePath} cwd={cwd} />;
   }
   return <TextFileViewer filePath={filePath} cwd={cwd} />;
 }
@@ -542,6 +724,7 @@ function TextFileViewer({ filePath, cwd }: Props) {
   const [wrapLines, setWrapLines] = useState(false);
   const [watching, setWatching] = useState(false);
   const [changeCount, setChangeCount] = useState(0);
+  const [copied, setCopied] = useState(false);
   const esRef = useRef<EventSource | null>(null);
 
   const fetchContent = useCallback((filePath: string, isRefresh = false) => {
@@ -781,6 +964,39 @@ function TextFileViewer({ filePath, cwd }: Props) {
               Raw
             </button>
           </div>
+        )}
+
+        {/* Copy button — visible in Raw mode */}
+        {viewMode === "source" && !previewMode && (
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(data.content).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              });
+            }}
+            title="Copy to clipboard"
+            style={{
+              padding: "2px 8px", fontSize: 11, cursor: "pointer",
+              background: copied ? "rgba(74,222,128,0.15)" : "var(--bg-hover)",
+              color: copied ? "#4ade80" : "var(--text-muted)",
+              border: "1px solid var(--border)", borderRadius: 5,
+              display: "flex", alignItems: "center", gap: 4,
+              transition: "background 0.15s, color 0.15s",
+            }}
+          >
+            {copied ? (
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            ) : (
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            )}
+            {copied ? "Copied" : "Copy"}
+          </button>
         )}
       </div>
 

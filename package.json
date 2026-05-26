@@ -1,9 +1,9 @@
 {
-  "name": "@agegr/pi-web",
+  "name": "@demon/pi-agent-xy",
   "version": "0.6.11",
-  "description": "Web UI for the pi coding agent",
+  "description": "Pi Agent xY - Web UI for the pi coding agent",
   "bin": {
-    "pi-web": "bin/pi-web.js"
+    "pi-agent-xy": "bin/pi-web.js"
   },
   "files": [
     "bin",
@@ -16,9 +16,9 @@
     "package.json"
   ],
   "scripts": {
-    "dev": "next dev -p 30141",
+    "dev": "next dev -p 30142 --webpack",
     "build": "next build --webpack",
-    "start": "next start -p 30141",
+    "start": "next start -p 30142",
     "lint": "eslint .",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"
   },
@@ -42,7 +42,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
     "postcss": "^8",
+    "pptxgenjs": "^3.12.0",
     "tailwindcss": "^4.2.2",
-    "typescript": "^5"
+    "typescript": "5.9.3"
   }
 }

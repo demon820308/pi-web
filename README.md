@@ -1,4 +1,4 @@
-# pi-web
+# Pi Agent xY
 
 [pi 编程智能体](https://github.com/badlogic/pi-mono) 的网页界面。在浏览器中浏览会话、与智能体对话、分叉对话、切换消息分支。
 
@@ -7,14 +7,14 @@
 **无需安装，直接运行：**
 
 ```bash
-npx @agegr/pi-web@latest
+npx @demon/pi-agent-xy@latest
 ```
 
 **或全局安装后使用：**
 
 ```bash
-npm install -g @agegr/pi-web
-pi-web
+npm install -g @demon/pi-agent-xy
+pi-agent-xy
 ```
 
 启动后打开 [http://localhost:30141](http://localhost:30141)。
@@ -22,11 +22,11 @@ pi-web
 **可选参数：**
 
 ```bash
-pi-web --port 8080               # 自定义端口
-pi-web --hostname 127.0.0.1      # 仅本机访问
-pi-web -p 8080 -H 127.0.0.1     # 组合使用
+pi-agent-xy --port 8080               # 自定义端口
+pi-agent-xy --hostname 127.0.0.1      # 仅本机访问
+pi-agent-xy -p 8080 -H 127.0.0.1     # 组合使用
 
-PORT=8080 pi-web                 # 也支持环境变量
+PORT=8080 pi-agent-xy                 # 也支持环境变量
 ```
 
 ## 功能介绍
@@ -51,7 +51,7 @@ PORT=8080 pi-web                 # 也支持环境变量
 
 ```bash
 npm install
-npm run dev   # 端口 30141
+npm run dev   # 端口 30142
 ```
 
 ## 项目结构
