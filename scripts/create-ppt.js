@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const pptxgen = require("pptxgenjs");
 
 let pres = new pptxgen();

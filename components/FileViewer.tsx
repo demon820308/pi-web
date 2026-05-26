@@ -549,17 +549,86 @@ function isLocalOrPrivateHost(hostname: string): boolean {
   return false;
 }
 
-function LocalPptxViewer({ filePath, src, formatSizeStr, ext }: { filePath: string; src: string; formatSizeStr: string | null; ext: string }) {
+interface PptxViewerInstance {
+  processor?: {
+    getSlideDimensions?(): { cx: number; cy: number };
+    presentation?: {
+      slideSize?: { cx: number; cy: number };
+    };
+  };
+  renderSlide(slideIndex: number, canvas: HTMLCanvasElement | null, options?: Record<string, unknown>): Promise<unknown>;
+  getSlideCount(): number;
+  getCurrentSlideIndex(): number;
+  destroy(): void;
+}
+
+function LocalPptxViewer({ src }: { filePath: string; src: string; formatSizeStr: string | null; ext: string }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [viewer, setViewer] = useState<any>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const modalCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const modalContainerRef = useRef<HTMLDivElement | null>(null);
+  const [viewer, setViewer] = useState<PptxViewerInstance | null>(null);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [totalSlides, setTotalSlides] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [aspectRatio, setAspectRatio] = useState<number | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalDimensions, setModalDimensions] = useState<{ width: number; height: number } | null>(null);
 
+  // 1. Observe container dimensions dynamically
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    // Set initial size
+    const rect = containerRef.current.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      setDimensions({ width: rect.width, height: rect.height });
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      if (!entries || entries.length === 0) return;
+      const { width, height } = entries[0].contentRect;
+      if (width > 0 && height > 0) {
+        setDimensions({ width, height });
+      }
+    });
+
+    observer.observe(containerRef.current);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  // 1b. Observe modal container dimensions dynamically when open
+  useEffect(() => {
+    if (!isModalOpen || !modalContainerRef.current) return;
+
+    // Set initial size
+    const rect = modalContainerRef.current.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      setModalDimensions({ width: rect.width, height: rect.height });
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      if (!entries || entries.length === 0) return;
+      const { width, height } = entries[0].contentRect;
+      if (width > 0 && height > 0) {
+        setModalDimensions({ width, height });
+      }
+    });
+
+    observer.observe(modalContainerRef.current);
+    return () => {
+      observer.disconnect();
+    };
+  }, [isModalOpen]);
+
+  // 2. Load the PPTX presentation (only on src change)
   useEffect(() => {
     let active = true;
-    let localViewer: any = null;
+    let localViewer: PptxViewerInstance | null = null;
 
     async function init() {
       try {
@@ -580,26 +649,44 @@ function LocalPptxViewer({ filePath, src, formatSizeStr, ext }: { filePath: stri
         
         if (!active) return;
 
-        localViewer = new PPTXViewer({
+        const rawViewer = new PPTXViewer({
           canvas: canvasRef.current,
           slideSizeMode: "fit",
+          autoChartRerenderDelayMs: 200,
         });
 
-        await localViewer.loadFile(new Uint8Array(arrayBuffer));
+        localViewer = rawViewer as unknown as PptxViewerInstance;
+        await rawViewer.loadFile(new Uint8Array(arrayBuffer));
 
         if (!active) return;
 
-        setViewer(localViewer);
         setTotalSlides(localViewer.getSlideCount());
         setCurrentSlide(localViewer.getCurrentSlideIndex());
         
-        // Render first slide
-        await localViewer.render();
+        let ratio = 16 / 9;
+        const processor = localViewer.processor;
+        if (processor) {
+          if (typeof processor.getSlideDimensions === "function") {
+            const slideSize = processor.getSlideDimensions();
+            if (slideSize && slideSize.cx && slideSize.cy) {
+              ratio = slideSize.cx / slideSize.cy;
+            }
+          } else if (processor.presentation?.slideSize) {
+            const slideSize = processor.presentation.slideSize;
+            if (slideSize && slideSize.cx && slideSize.cy) {
+              ratio = slideSize.cx / slideSize.cy;
+            }
+          }
+        }
+        setAspectRatio(ratio);
+
+        setViewer(localViewer);
         setLoading(false);
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : String(err);
         console.error("PPTX render error:", err);
         if (active) {
-          setError(err.message || "Failed to render PowerPoint presentation");
+          setError(errMsg || "Failed to render PowerPoint presentation");
           setLoading(false);
         }
       }
@@ -612,38 +699,105 @@ function LocalPptxViewer({ filePath, src, formatSizeStr, ext }: { filePath: stri
       if (localViewer) {
         try {
           localViewer.destroy();
-        } catch (e) {
+        } catch {
           // ignore
         }
       }
     };
   }, [src]);
 
-  const handleNext = async () => {
-    if (viewer && currentSlide < totalSlides - 1) {
-      setLoading(true);
+  // 3. Calculate exact canvas dimensions based on container sizes and slide aspect ratio
+  const currentRatio = aspectRatio || (16 / 9);
+  let canvasWidth = 0;
+  let canvasHeight = 0;
+
+  if (dimensions) {
+    // Keep 16px padding on all sides (total 32px subtracted)
+    const maxW = Math.max(10, dimensions.width - 32);
+    const maxH = Math.max(10, dimensions.height - 32);
+
+    if (maxW / maxH > currentRatio) {
+      canvasHeight = maxH;
+      canvasWidth = maxH * currentRatio;
+    } else {
+      canvasWidth = maxW;
+      canvasHeight = maxW / currentRatio;
+    }
+  }
+
+  // Calculate exact canvas dimensions for the modal
+  let modalCanvasWidth = 0;
+  let modalCanvasHeight = 0;
+
+  if (isModalOpen && modalDimensions) {
+    // Keep 24px padding on each side (total 48px subtracted) and 80px for header
+    const maxW = Math.max(10, modalDimensions.width - 48);
+    const maxH = Math.max(10, modalDimensions.height - 80);
+
+    if (maxW / maxH > currentRatio) {
+      modalCanvasHeight = maxH;
+      modalCanvasWidth = maxH * currentRatio;
+    } else {
+      modalCanvasWidth = maxW;
+      modalCanvasHeight = maxW / currentRatio;
+    }
+  }
+
+  // 4. Render the current slide on the main canvas when viewer, slide index, or canvas dimensions change
+  useEffect(() => {
+    const currentViewer = viewer;
+    if (!currentViewer || !canvasRef.current || canvasWidth === 0 || canvasHeight === 0 || isModalOpen) return;
+
+    let active = true;
+    async function draw() {
+      if (!currentViewer) return;
       try {
-        await viewer.nextSlide();
-        setCurrentSlide(viewer.getCurrentSlideIndex());
+        await currentViewer.renderSlide(currentSlide, canvasRef.current, { quality: "high" });
       } catch (e) {
-        // ignore
-      } finally {
-        setLoading(false);
+        if (active) {
+          console.error("Render slide error:", e);
+        }
       }
+    }
+    draw();
+
+    return () => {
+      active = false;
+    };
+  }, [viewer, currentSlide, canvasWidth, canvasHeight, isModalOpen]);
+
+  // 4b. Render the current slide in the modal when viewer, currentSlide, dimensions, or canvas size changes
+  useEffect(() => {
+    const currentViewer = viewer;
+    if (!isModalOpen || !currentViewer || !modalCanvasRef.current || modalCanvasWidth === 0 || modalCanvasHeight === 0) return;
+
+    let active = true;
+    async function draw() {
+      if (!currentViewer) return;
+      try {
+        await currentViewer.renderSlide(currentSlide, modalCanvasRef.current, { quality: "high" });
+      } catch (e) {
+        if (active) {
+          console.error("Render modal slide error:", e);
+        }
+      }
+    }
+    draw();
+
+    return () => {
+      active = false;
+    };
+  }, [isModalOpen, viewer, currentSlide, modalCanvasWidth, modalCanvasHeight]);
+
+  const handleNext = () => {
+    if (viewer && currentSlide < totalSlides - 1) {
+      setCurrentSlide(currentSlide + 1);
     }
   };
 
-  const handlePrev = async () => {
+  const handlePrev = () => {
     if (viewer && currentSlide > 0) {
-      setLoading(true);
-      try {
-        await viewer.previousSlide();
-        setCurrentSlide(viewer.getCurrentSlideIndex());
-      } catch (e) {
-        // ignore
-      } finally {
-        setLoading(false);
-      }
+      setCurrentSlide(currentSlide - 1);
     }
   };
 
@@ -697,6 +851,23 @@ function LocalPptxViewer({ filePath, src, formatSizeStr, ext }: { filePath: stri
           >
             Next ▶
           </button>
+          <button
+            onClick={() => setIsModalOpen(true)}
+            disabled={loading || totalSlides === 0}
+            title="Open in fullscreen zoom"
+            style={{
+              padding: "4px 10px",
+              fontSize: 11,
+              borderRadius: 4,
+              border: "1px solid var(--border)",
+              background: "var(--bg-hover)",
+              color: "var(--text)",
+              cursor: (loading || totalSlides === 0) ? "default" : "pointer",
+              opacity: (loading || totalSlides === 0) ? 0.5 : 1,
+            }}
+          >
+            🔍 Zoom
+          </button>
           <a
             href={src}
             download
@@ -719,15 +890,18 @@ function LocalPptxViewer({ filePath, src, formatSizeStr, ext }: { filePath: stri
       </div>
 
       {/* Main rendering area */}
-      <div style={{
-        flex: 1,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        overflow: "auto",
-        padding: 16,
-        position: "relative"
-      }}>
+      <div 
+        ref={containerRef}
+        style={{
+          flex: 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "var(--bg-panel)",
+          position: "relative",
+          overflow: "hidden"
+        }}
+      >
         {loading && (
           <div style={{
             position: "absolute",
@@ -746,51 +920,164 @@ function LocalPptxViewer({ filePath, src, formatSizeStr, ext }: { filePath: stri
         
         {error ? (
           <div style={{
-            padding: 24,
-            background: "var(--bg-panel)",
-            borderRadius: 8,
-            border: "1px solid var(--border)",
-            textAlign: "center",
-            maxWidth: 400
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16
           }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>⚠️</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "#f87171", marginBottom: 8 }}>
-              Local Preview Failed
+            <div style={{
+              padding: 24,
+              background: "var(--bg-panel)",
+              borderRadius: 8,
+              border: "1px solid var(--border)",
+              textAlign: "center",
+              maxWidth: 400
+            }}>
+              <div style={{ fontSize: 36, marginBottom: 12 }}>⚠️</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#f87171", marginBottom: 8 }}>
+                Local Preview Failed
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
+                {error}
+              </div>
+              <a
+                href={src}
+                download
+                style={{
+                  padding: "6px 16px",
+                  background: "var(--accent)",
+                  color: "white",
+                  borderRadius: 4,
+                  textDecoration: "none",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  display: "inline-block"
+                }}
+              >
+                ⬇️ Download File
+              </a>
             </div>
-            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16 }}>
-              {error}
-            </div>
-            <a
-              href={src}
-              download
-              style={{
-                padding: "6px 16px",
-                background: "var(--accent)",
-                color: "white",
-                borderRadius: 4,
-                textDecoration: "none",
-                fontSize: 12,
-                fontWeight: 500,
-                display: "inline-block"
-              }}
-            >
-              ⬇️ Download File
-            </a>
           </div>
         ) : (
           <canvas
             ref={canvasRef}
             style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "contain",
+              width: `${Math.round(canvasWidth)}px`,
+              height: `${Math.round(canvasHeight)}px`,
               boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
               background: "white",
-              display: loading && totalSlides === 0 ? "none" : "block"
+              display: "block",
+              visibility: loading && totalSlides === 0 ? "hidden" : "visible"
             }}
           />
         )}
       </div>
+
+      {/* Modal Zoom Overlay */}
+      {isModalOpen && (
+        <div style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 1000,
+          background: "rgba(10, 10, 10, 0.95)",
+          backdropFilter: "blur(8px)",
+          display: "flex",
+          flexDirection: "column",
+          padding: "20px 24px",
+          color: "white"
+        }}>
+          {/* Modal Header */}
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 16,
+            flexShrink: 0
+          }}>
+            <span style={{ fontSize: 13, color: "#ccc", fontWeight: 500 }}>
+              {totalSlides > 0 ? `Slide ${currentSlide + 1} of ${totalSlides}` : ""}
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={handlePrev}
+                disabled={currentSlide === 0}
+                style={{
+                  padding: "6px 14px",
+                  fontSize: 12,
+                  borderRadius: 4,
+                  border: "1px solid #444",
+                  background: "#222",
+                  color: "white",
+                  cursor: currentSlide === 0 ? "default" : "pointer",
+                  opacity: currentSlide === 0 ? 0.5 : 1,
+                }}
+              >
+                ◀ Prev
+              </button>
+              <button
+                onClick={handleNext}
+                disabled={currentSlide === totalSlides - 1}
+                style={{
+                  padding: "6px 14px",
+                  fontSize: 12,
+                  borderRadius: 4,
+                  border: "1px solid #444",
+                  background: "#222",
+                  color: "white",
+                  cursor: currentSlide === totalSlides - 1 ? "default" : "pointer",
+                  opacity: currentSlide === totalSlides - 1 ? 0.5 : 1,
+                }}
+              >
+                Next ▶
+              </button>
+              <button
+                onClick={() => setIsModalOpen(false)}
+                style={{
+                  padding: "6px 16px",
+                  fontSize: 12,
+                  borderRadius: 4,
+                  border: "none",
+                  background: "#ef4444",
+                  color: "white",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  marginLeft: 12
+                }}
+              >
+                ✕ Close
+              </button>
+            </div>
+          </div>
+
+          {/* Modal Canvas Container */}
+          <div 
+            ref={modalContainerRef}
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
+              position: "relative"
+            }}
+          >
+            {modalCanvasWidth > 0 && modalCanvasHeight > 0 && (
+              <canvas
+                ref={modalCanvasRef}
+                style={{
+                  width: `${Math.round(modalCanvasWidth)}px`,
+                  height: `${Math.round(modalCanvasHeight)}px`,
+                  boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+                  background: "white",
+                  display: "block"
+                }}
+              />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -934,6 +1221,7 @@ function TextFileViewer({ filePath, cwd }: Props) {
   const [watching, setWatching] = useState(false);
   const [changeCount, setChangeCount] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [isHtmlModalOpen, setIsHtmlModalOpen] = useState(false);
   const esRef = useRef<EventSource | null>(null);
 
   const fetchContent = useCallback((filePath: string, isRefresh = false) => {
@@ -1121,29 +1409,46 @@ function TextFileViewer({ filePath, cwd }: Props) {
 
         {/* HTML source/preview toggle */}
         {isHtml && viewMode === "source" && (
-          <div style={{ display: "flex", borderRadius: 5, overflow: "hidden", border: "1px solid var(--border)" }}>
-            <button
-              onClick={() => setPreviewMode(false)}
-              style={{
-                padding: "2px 8px", fontSize: 11, border: "none", cursor: "pointer",
-                background: !previewMode ? "var(--bg-selected)" : "var(--bg-hover)",
-                color: !previewMode ? "var(--text)" : "var(--text-muted)",
-                fontWeight: !previewMode ? 600 : 400,
-              }}
-            >
-              Code
-            </button>
-            <button
-              onClick={() => setPreviewMode(true)}
-              style={{
-                padding: "2px 8px", fontSize: 11, border: "none", borderLeft: "1px solid var(--border)", cursor: "pointer",
-                background: previewMode ? "var(--bg-selected)" : "var(--bg-hover)",
-                color: previewMode ? "var(--text)" : "var(--text-muted)",
-                fontWeight: previewMode ? 600 : 400,
-              }}
-            >
-              Preview
-            </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ display: "flex", borderRadius: 5, overflow: "hidden", border: "1px solid var(--border)" }}>
+              <button
+                onClick={() => setPreviewMode(false)}
+                style={{
+                  padding: "2px 8px", fontSize: 11, border: "none", cursor: "pointer",
+                  background: !previewMode ? "var(--bg-selected)" : "var(--bg-hover)",
+                  color: !previewMode ? "var(--text)" : "var(--text-muted)",
+                  fontWeight: !previewMode ? 600 : 400,
+                }}
+              >
+                Code
+              </button>
+              <button
+                onClick={() => setPreviewMode(true)}
+                style={{
+                  padding: "2px 8px", fontSize: 11, border: "none", borderLeft: "1px solid var(--border)", cursor: "pointer",
+                  background: previewMode ? "var(--bg-selected)" : "var(--bg-hover)",
+                  color: previewMode ? "var(--text)" : "var(--text-muted)",
+                  fontWeight: previewMode ? 600 : 400,
+                }}
+              >
+                Preview
+              </button>
+            </div>
+            {previewMode && (
+              <button
+                onClick={() => setIsHtmlModalOpen(true)}
+                title="Open preview in fullscreen modal"
+                style={{
+                  padding: "2px 8px", fontSize: 11, cursor: "pointer",
+                  background: "var(--bg-hover)",
+                  color: "var(--text-muted)",
+                  border: "1px solid var(--border)", borderRadius: 5,
+                  fontWeight: 400,
+                }}
+              >
+                🔍 Zoom
+              </button>
+            )}
           </div>
         )}
 
@@ -1254,6 +1559,65 @@ function TextFileViewer({ filePath, cwd }: Props) {
           </SyntaxHighlighter>
         )}
       </div>
+
+      {/* HTML Fullscreen Modal */}
+      {isHtmlModalOpen && (
+        <div style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 1000,
+          background: "rgba(10, 10, 10, 0.95)",
+          backdropFilter: "blur(8px)",
+          display: "flex",
+          flexDirection: "column",
+          padding: "20px 24px",
+          color: "white"
+        }}>
+          {/* Modal Header */}
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 16,
+            flexShrink: 0
+          }}>
+            <span style={{ fontSize: 13, color: "#ccc", fontWeight: 500 }}>
+              HTML Fullscreen Preview
+            </span>
+            <button
+              onClick={() => setIsHtmlModalOpen(false)}
+              style={{
+                padding: "6px 16px",
+                fontSize: 12,
+                borderRadius: 4,
+                border: "none",
+                background: "#ef4444",
+                color: "white",
+                cursor: "pointer",
+                fontWeight: 600
+              }}
+            >
+              ✕ Close
+            </button>
+          </div>
+
+          {/* Modal Content */}
+          <div style={{
+            flex: 1,
+            background: "white",
+            borderRadius: 8,
+            overflow: "hidden",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.5)"
+          }}>
+            <iframe
+              srcDoc={data.content}
+              sandbox="allow-scripts"
+              style={{ width: "100%", height: "100%", border: "none" }}
+              title="HTML fullscreen preview"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
