@@ -15,10 +15,11 @@ export async function GET() {
     const authStorage = AuthStorage.create();
     const registry = ModelRegistry.create(authStorage);
     const available = registry.getAvailable();
-    modelList = available.map((m: { id: string; name: string; provider: string }) => ({
+    modelList = available.map((m) => ({
       id: m.id,
       name: m.name,
       provider: m.provider,
+      supportsVision: Array.isArray(m.input) && m.input.includes("image"),
     }));
     for (const m of available) {
       const key = `${m.provider}:${m.id}`;

@@ -22,7 +22,7 @@ interface Props {
   isStreaming: boolean;
   model?: { provider: string; modelId: string } | null;
   modelNames?: Record<string, string>;
-  modelList?: { id: string; name: string; provider: string }[];
+  modelList?: { id: string; name: string; provider: string; supportsVision?: boolean }[];
   onModelChange?: (provider: string, modelId: string) => void;
   onCompact?: () => void;
   onAbortCompaction?: () => void;
@@ -112,7 +112,8 @@ function isVisionModel(provider: string, modelId: string): boolean {
     mid.includes("gemini-2.0") ||
     mid.includes("llama-3.2-11b") ||
     mid.includes("llama-3.2-90b") ||
-    mid.includes("pixtral")
+    mid.includes("pixtral") ||
+    mid.includes("mimo")
   ) {
     return true;
   }
@@ -233,7 +234,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     const img = attachedImages[index];
     if (!img) return;
 
-    if (!model || !isVisionModel(model.provider, model.modelId)) {
+    // Check if the currently selected model supports vision dynamically based on modelList capabilities,
+    // falling back to isVisionModel for offline/fallback checks.
+    const dynamicModel = modelList?.find(m => m.id === model?.modelId && m.provider === model?.provider);
+    const supportsVision = dynamicModel 
+      ? !!dynamicModel.supportsVision 
+      : (model ? isVisionModel(model.provider, model.modelId) : false);
+
+    if (!supportsVision) {
       setDescribeError("当前模型不支持，请切换模型。");
       return;
     }
@@ -247,8 +255,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         body: JSON.stringify({
           image: img.data,
           mimeType: img.mimeType,
-          provider: model.provider,
-          modelId: model.modelId,
+          provider: model!.provider,
+          modelId: model!.modelId,
         }),
       });
       const data = await res.json();
@@ -269,7 +277,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     } finally {
       setDescribingIndices((prev) => ({ ...prev, [index]: false }));
     }
-  }, [attachedImages, model]);
+  }, [attachedImages, model, modelList]);
 
   const handleSend = useCallback(() => {
     const msg = value.trim();
