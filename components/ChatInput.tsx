@@ -59,6 +59,67 @@ const THINKING_LEVEL_DESC: Record<typeof THINKING_LEVELS[number], string> = {
   xhigh: "最高强度推理",
 };
 
+function isVisionModel(provider: string, modelId: string): boolean {
+  const pid = provider.toLowerCase();
+  const mid = modelId.toLowerCase();
+
+  // If it's explicitly deepseek, it doesn't support vision
+  if (pid.includes("deepseek") || mid.includes("deepseek")) {
+    return false;
+  }
+
+  // 1. OpenAI Vision Models
+  if (pid.includes("openai")) {
+    if (mid.includes("o1-mini")) return false;
+    if (
+      mid.includes("gpt-4o") ||
+      mid.includes("gpt-4-turbo") ||
+      mid.includes("vision") ||
+      mid === "o1" ||
+      mid.startsWith("o1-202")
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  // 2. Anthropic Vision Models (Claude 3 / 3.5 series)
+  if (pid.includes("anthropic")) {
+    if (mid.includes("claude-3")) {
+      return true;
+    }
+    return false;
+  }
+
+  // 3. Gemini / Google Vision Models
+  if (pid.includes("google") || pid.includes("gemini")) {
+    if (
+      mid.includes("gemini-1.5") ||
+      mid.includes("gemini-2.0") ||
+      mid.includes("vision")
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  // 4. Other models (e.g. OpenRouter, Groq, local models)
+  if (
+    mid.includes("vision") ||
+    mid.includes("gpt-4o") ||
+    mid.includes("claude-3") ||
+    mid.includes("gemini-1.5") ||
+    mid.includes("gemini-2.0") ||
+    mid.includes("llama-3.2-11b") ||
+    mid.includes("llama-3.2-90b") ||
+    mid.includes("pixtral")
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, modelNames, modelList, onModelChange,
   onCompact, onAbortCompaction, isCompacting, compactError, toolPreset, onToolPresetChange,
@@ -171,13 +232,24 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const handleDescribe = useCallback(async (index: number) => {
     const img = attachedImages[index];
     if (!img) return;
+
+    if (!model || !isVisionModel(model.provider, model.modelId)) {
+      setDescribeError("当前模型不支持，请切换模型。");
+      return;
+    }
+
     setDescribingIndices((prev) => ({ ...prev, [index]: true }));
     setDescribeError(null);
     try {
       const res = await fetch("/api/agent/describe-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: img.data, mimeType: img.mimeType }),
+        body: JSON.stringify({
+          image: img.data,
+          mimeType: img.mimeType,
+          provider: model.provider,
+          modelId: model.modelId,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -197,7 +269,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     } finally {
       setDescribingIndices((prev) => ({ ...prev, [index]: false }));
     }
-  }, [attachedImages]);
+  }, [attachedImages, model]);
 
   const handleSend = useCallback(() => {
     const msg = value.trim();
