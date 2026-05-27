@@ -204,7 +204,7 @@ export async function POST(req: Request) {
             },
           ],
           generationConfig: {
-            maxOutputTokens: 300,
+            maxOutputTokens: 1000,
           },
         }),
       });
@@ -227,7 +227,7 @@ export async function POST(req: Request) {
         },
         body: JSON.stringify({
           model: modelId || "claude-3-5-sonnet-20241022",
-          max_tokens: 300,
+          max_tokens: 1000,
           messages: [
             {
               role: "user",
@@ -273,7 +273,7 @@ export async function POST(req: Request) {
             ],
           },
         ],
-        max_tokens: 300,
+        max_tokens: 1000,
       };
       console.log(`[describe-image] Sending to: ${endpoint}`);
       console.log(`[describe-image] model: ${modelId}, provider: ${provider}`);
