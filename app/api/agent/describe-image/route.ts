@@ -40,7 +40,13 @@ export async function POST(req: Request) {
       }
     }
 
-    // 2. If no key resolved for requested provider, fall back to first configured OpenAI / Anthropic key
+    // 2. Override with LINGYA_API_KEY if requesting xiaomi-token-plan / mimo / lingya and it is configured in env
+    const isXiaomiOrMimo = provider.includes("xiaomi-token-plan") || provider.includes("mimo") || provider.includes("lingya");
+    if (isXiaomiOrMimo && process.env.LINGYA_API_KEY) {
+      apiKey = process.env.LINGYA_API_KEY;
+    }
+
+    // 3. If no key resolved for requested provider, fall back to first configured OpenAI / Anthropic key
     if (!apiKey) {
       const openaiAuth = authStorage.get("openai") as { key?: string } | undefined;
       if (openaiAuth?.key) {
@@ -57,7 +63,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3. Fallback to general environment variables if still no key
+    // 4. Fallback to general environment variables if still no key
     if (!apiKey) {
       if (process.env.OPENAI_API_KEY) {
         apiKey = process.env.OPENAI_API_KEY;
@@ -82,11 +88,26 @@ export async function POST(req: Request) {
 
     const promptText = "请详细分析并用一段话描述这张图片（网页界面设计、原型图或应用 UI 截图）的整体结构、布局、颜色和主要 UI 元素，作为给编码智能体（Coding Agent）生成代码的系统性描述提示词。直接输出描述内容，不要有任何前导词或说明。";
 
-    // 4. API Calls based on resolved provider
-    if (provider === "openai" || provider === "openrouter") {
-      const endpoint = provider === "openrouter"
-        ? "https://openrouter.ai/api/v1/chat/completions"
-        : "https://api.openai.com/v1/chat/completions";
+    // 5. Check if provider is OpenAI-compatible (including Custom endpoints)
+    const isOpenAICompatible = provider === "openai" ||
+                               provider === "openrouter" ||
+                               provider.includes("xiaomi-token-plan") ||
+                               provider.includes("mimo") ||
+                               provider.includes("lingya");
+
+    // 6. API Calls based on resolved provider
+    if (isOpenAICompatible) {
+      let endpoint = "https://api.openai.com/v1/chat/completions";
+
+      if (provider === "openrouter") {
+        endpoint = "https://openrouter.ai/api/v1/chat/completions";
+      } else if (provider.includes("xiaomi-token-plan") || provider.includes("mimo") || provider.includes("lingya")) {
+        if (process.env.LINGYA_API_URL) {
+          endpoint = `${process.env.LINGYA_API_URL}/chat/completions`;
+        } else {
+          endpoint = "https://token-plan.api.xiaomi.net/v1/chat/completions";
+        }
+      }
 
       const response = await fetch(endpoint, {
         method: "POST",
@@ -95,7 +116,7 @@ export async function POST(req: Request) {
           "Authorization": `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: modelId || "gpt-4o-mini",
+          model: modelId || "mimo-v2.5",
           messages: [
             {
               role: "user",
