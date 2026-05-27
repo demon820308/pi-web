@@ -16,6 +16,25 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "image and mimeType are required" }, { status: 400 });
     }
 
+    // 1. Sanitize image base64 data to prevent double-prefix and whitespace issues
+    let base64Data = image.trim();
+    if (base64Data.startsWith("data:")) {
+      const commaIndex = base64Data.indexOf(",");
+      if (commaIndex !== -1) {
+        base64Data = base64Data.substring(commaIndex + 1);
+      }
+    }
+    base64Data = base64Data.replace(/\s/g, "");
+
+    // 2. Normalize mimeType
+    let normalizedMimeType = mimeType.toLowerCase().trim();
+    if (normalizedMimeType.includes(";")) {
+      normalizedMimeType = normalizedMimeType.split(";")[0];
+    }
+    if (normalizedMimeType === "image/jpg") {
+      normalizedMimeType = "image/jpeg";
+    }
+
     const authStorage = AuthStorage.create();
     const registry = ModelRegistry.create(authStorage);
 
@@ -26,7 +45,7 @@ export async function POST(req: Request) {
     let headers: Record<string, string> = { "Content-Type": "application/json" };
     let useGoogleApi = false;
 
-    // 1. Try to find the model in the registry to get authentic endpoint + headers
+    // 3. Try to find the model in the registry to get authentic endpoint + headers
     const model = reqProvider && reqModelId ? registry.find(reqProvider, reqModelId) : undefined;
 
     if (model) {
@@ -50,7 +69,7 @@ export async function POST(req: Request) {
         useGoogleApi = true;
       }
     } else {
-      // 2. Fallback to manual resolution if not found in registry
+      // 4. Fallback to manual resolution if not found in registry
       if (provider) {
         const auth = authStorage.get(provider) as { key?: string } | undefined;
         if (auth?.key) {
@@ -133,7 +152,7 @@ export async function POST(req: Request) {
 
     const promptText = "请详细分析并用一段话描述这张图片（网页界面设计、原型图或应用 UI 截图）的整体结构、布局、颜色和主要 UI 元素，作为给编码智能体（Coding Agent）生成代码的系统性描述提示词。直接输出描述内容，不要有任何前导词或说明。";
 
-    // 3. Make API Call based on resolved provider
+    // 5. Make API Call based on resolved provider
     if (useGoogleApi) {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`, {
         method: "POST",
@@ -145,8 +164,8 @@ export async function POST(req: Request) {
                 { text: promptText },
                 {
                   inlineData: {
-                    mimeType,
-                    data: image,
+                    mimeType: normalizedMimeType,
+                    data: base64Data,
                   },
                 },
               ],
@@ -185,8 +204,8 @@ export async function POST(req: Request) {
                   type: "image",
                   source: {
                     type: "base64",
-                    media_type: mimeType,
-                    data: image,
+                    media_type: normalizedMimeType,
+                    data: base64Data,
                   },
                 },
                 { type: "text", text: promptText },
@@ -218,7 +237,7 @@ export async function POST(req: Request) {
                 {
                   type: "image_url",
                   image_url: {
-                    url: `data:${mimeType};base64,${image}`,
+                    url: `data:${normalizedMimeType};base64,${base64Data}`,
                   },
                 },
               ],

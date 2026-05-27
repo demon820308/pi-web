@@ -197,15 +197,21 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     try {
       const newImages = await Promise.all(
         imageFiles.map(async (file) => {
-          const res = new Response(file);
-          const buf = await res.arrayBuffer();
-          const bytes = new Uint8Array(buf);
-          let binary = "";
-          for (let i = 0; i < bytes.length; i++) {
-            binary += String.fromCharCode(bytes[i]);
-          }
-          const base64 = btoa(binary);
-          return { data: base64, mimeType: file.type, previewUrl: URL.createObjectURL(file) };
+          return new Promise<AttachedImage>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const result = reader.result as string;
+              const commaIndex = result.indexOf(",");
+              const base64 = commaIndex !== -1 ? result.substring(commaIndex + 1) : result;
+              resolve({
+                data: base64,
+                mimeType: file.type,
+                previewUrl: URL.createObjectURL(file),
+              });
+            };
+            reader.onerror = (err) => reject(err);
+            reader.readAsDataURL(file);
+          });
         })
       );
       setAttachedImages((prev) => [...prev, ...newImages]);
