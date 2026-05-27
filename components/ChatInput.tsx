@@ -123,23 +123,24 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const processImageFiles = useCallback(async (files: File[]) => {
     const imageFiles = files.filter((f) => f.type.startsWith("image/"));
     if (!imageFiles.length) return;
-    const newImages = await Promise.all(
-      imageFiles.map(
-        (file) =>
-          new Promise<AttachedImage>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const result = reader.result as string;
-              // result is "data:<mime>;base64,<data>"
-              const base64 = result.split(",")[1];
-              resolve({ data: base64, mimeType: file.type, previewUrl: URL.createObjectURL(file) });
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-          })
-      )
-    );
-    setAttachedImages((prev) => [...prev, ...newImages]);
+    try {
+      const newImages = await Promise.all(
+        imageFiles.map(async (file) => {
+          const res = new Response(file);
+          const buf = await res.arrayBuffer();
+          const bytes = new Uint8Array(buf);
+          let binary = "";
+          for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const base64 = btoa(binary);
+          return { data: base64, mimeType: file.type, previewUrl: URL.createObjectURL(file) };
+        })
+      );
+      setAttachedImages((prev) => [...prev, ...newImages]);
+    } catch (e) {
+      console.error("Failed to process image files:", e);
+    }
   }, []);
 
   const removeImage = useCallback((index: number) => {
