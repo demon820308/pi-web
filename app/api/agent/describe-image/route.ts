@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 export const dynamic = "force-dynamic";
 
@@ -17,87 +17,106 @@ export async function POST(req: Request) {
     }
 
     const authStorage = AuthStorage.create();
-    let apiKey = "";
+    const registry = ModelRegistry.create(authStorage);
+
     let provider = reqProvider ? reqProvider.toLowerCase() : "";
     let modelId = reqModelId || "";
+    let apiKey = "";
+    let endpoint = "";
+    let headers: Record<string, string> = { "Content-Type": "application/json" };
+    let useGoogleApi = false;
 
-    // 1. First attempt to resolve API key for the requested provider
-    if (provider) {
-      const auth = authStorage.get(provider) as { key?: string } | undefined;
-      if (auth?.key) {
-        apiKey = auth.key;
-      } else {
-        const envNames = [
-          `${provider.toUpperCase()}_API_KEY`,
-          `${provider.toUpperCase().replace("-", "_")}_API_KEY`
-        ];
-        for (const name of envNames) {
-          if (process.env[name]) {
-            apiKey = process.env[name]!;
-            break;
+    // 1. Try to find the model in the registry to get authentic endpoint + headers
+    const model = reqProvider && reqModelId ? registry.find(reqProvider, reqModelId) : undefined;
+
+    if (model) {
+      const auth = await registry.getApiKeyAndHeaders(model);
+      if (!auth.ok) {
+        return NextResponse.json({ error: `无法解析模型认证: ${auth.error}` }, { status: 400 });
+      }
+
+      endpoint = `${model.baseUrl}/chat/completions`;
+      if (auth.apiKey) {
+        apiKey = auth.apiKey;
+        headers["Authorization"] = `Bearer ${apiKey}`;
+      }
+      if (auth.headers) {
+        headers = { ...headers, ...auth.headers };
+      }
+      modelId = model.id;
+      provider = model.provider;
+
+      if (provider.toLowerCase() === "google" || provider.toLowerCase() === "gemini") {
+        useGoogleApi = true;
+      }
+    } else {
+      // 2. Fallback to manual resolution if not found in registry
+      if (provider) {
+        const auth = authStorage.get(provider) as { key?: string } | undefined;
+        if (auth?.key) {
+          apiKey = auth.key;
+        } else {
+          const envNames = [
+            `${provider.toUpperCase()}_API_KEY`,
+            `${provider.toUpperCase().replace("-", "_")}_API_KEY`
+          ];
+          for (const name of envNames) {
+            if (process.env[name]) {
+              apiKey = process.env[name]!;
+              break;
+            }
           }
         }
       }
-    }
 
-    // 2. Override with LINGYA_API_KEY if requesting xiaomi-token-plan / mimo / lingya and it is configured in env
-    const isXiaomiOrMimo = provider.includes("xiaomi-token-plan") || provider.includes("mimo") || provider.includes("lingya");
-    if (isXiaomiOrMimo && process.env.LINGYA_API_KEY) {
-      apiKey = process.env.LINGYA_API_KEY;
-    }
+      // Check LINGYA_API_KEY override for Xiaomi / mimo endpoints
+      const isXiaomiOrMimo = provider.includes("xiaomi-token-plan") || provider.includes("mimo") || provider.includes("lingya");
+      if (isXiaomiOrMimo && process.env.LINGYA_API_KEY) {
+        apiKey = process.env.LINGYA_API_KEY;
+      }
 
-    // 3. If no key resolved for requested provider, fall back to first configured OpenAI / Anthropic key
-    if (!apiKey) {
-      const openaiAuth = authStorage.get("openai") as { key?: string } | undefined;
-      if (openaiAuth?.key) {
-        apiKey = openaiAuth.key;
-        provider = "openai";
-        modelId = "gpt-4o-mini";
-      } else {
-        const anthropicAuth = authStorage.get("anthropic") as { key?: string } | undefined;
-        if (anthropicAuth?.key) {
-          apiKey = anthropicAuth.key;
-          provider = "anthropic";
-          modelId = "claude-3-5-sonnet-20241022";
+      // Fall back to first configured OpenAI / Anthropic key
+      if (!apiKey) {
+        const openaiAuth = authStorage.get("openai") as { key?: string } | undefined;
+        if (openaiAuth?.key) {
+          apiKey = openaiAuth.key;
+          provider = "openai";
+          modelId = "gpt-4o-mini";
+        } else {
+          const anthropicAuth = authStorage.get("anthropic") as { key?: string } | undefined;
+          if (anthropicAuth?.key) {
+            apiKey = anthropicAuth.key;
+            provider = "anthropic";
+            modelId = "claude-3-5-sonnet-20241022";
+          }
         }
       }
-    }
 
-    // 4. Fallback to general environment variables if still no key
-    if (!apiKey) {
-      if (process.env.OPENAI_API_KEY) {
-        apiKey = process.env.OPENAI_API_KEY;
-        provider = "openai";
-        modelId = "gpt-4o-mini";
-      } else if (process.env.ANTHROPIC_API_KEY) {
-        apiKey = process.env.ANTHROPIC_API_KEY;
-        provider = "anthropic";
-        modelId = "claude-3-5-sonnet-20241022";
-      } else if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) {
-        apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
-        provider = "google";
-        modelId = "gemini-1.5-flash";
+      // Fall back to general environment variables
+      if (!apiKey) {
+        if (process.env.OPENAI_API_KEY) {
+          apiKey = process.env.OPENAI_API_KEY;
+          provider = "openai";
+          modelId = "gpt-4o-mini";
+        } else if (process.env.ANTHROPIC_API_KEY) {
+          apiKey = process.env.ANTHROPIC_API_KEY;
+          provider = "anthropic";
+          modelId = "claude-3-5-sonnet-20241022";
+        } else if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) {
+          apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
+          provider = "google";
+          modelId = "gemini-1.5-flash";
+        }
       }
-    }
 
-    if (!apiKey) {
-      return NextResponse.json({
-        error: "未配置可用视觉模型的 API 密钥（OpenAI 或 Anthropic）。请先在侧边栏底部的 Models 中配置 API Key，或在系统环境变量中设置 OPENAI_API_KEY。"
-      }, { status: 400 });
-    }
+      if (!apiKey) {
+        return NextResponse.json({
+          error: "未配置可用视觉模型的 API 密钥（OpenAI 或 Anthropic）。请先在侧边栏底部的 Models 中配置 API Key，或在系统环境变量中设置 OPENAI_API_KEY。"
+        }, { status: 400 });
+      }
 
-    const promptText = "请详细分析并用一段话描述这张图片（网页界面设计、原型图或应用 UI 截图）的整体结构、布局、颜色和主要 UI 元素，作为给编码智能体（Coding Agent）生成代码的系统性描述提示词。直接输出描述内容，不要有任何前导词或说明。";
-
-    // 5. Check if provider is OpenAI-compatible (including Custom endpoints)
-    const isOpenAICompatible = provider === "openai" ||
-                               provider === "openrouter" ||
-                               provider.includes("xiaomi-token-plan") ||
-                               provider.includes("mimo") ||
-                               provider.includes("lingya");
-
-    // 6. API Calls based on resolved provider
-    if (isOpenAICompatible) {
-      let endpoint = "https://api.openai.com/v1/chat/completions";
+      headers["Authorization"] = `Bearer ${apiKey}`;
+      endpoint = "https://api.openai.com/v1/chat/completions";
 
       if (provider === "openrouter") {
         endpoint = "https://openrouter.ai/api/v1/chat/completions";
@@ -107,51 +126,45 @@ export async function POST(req: Request) {
         } else {
           endpoint = "https://token-plan.api.xiaomi.net/v1/chat/completions";
         }
+      } else if (provider === "google" || provider === "gemini") {
+        useGoogleApi = true;
       }
+    }
 
-      let apiModelId = modelId || "gpt-4o-mini";
-      if (
-        apiModelId.toLowerCase().includes("mimo") ||
-        provider.includes("xiaomi-token-plan") ||
-        provider.includes("mimo") ||
-        provider.includes("lingya")
-      ) {
-        apiModelId = "gpt-4o-mini";
-      }
+    const promptText = "请详细分析并用一段话描述这张图片（网页界面设计、原型图或应用 UI 截图）的整体结构、布局、颜色和主要 UI 元素，作为给编码智能体（Coding Agent）生成代码的系统性描述提示词。直接输出描述内容，不要有任何前导词或说明。";
 
-      const response = await fetch(endpoint, {
+    // 3. Make API Call based on resolved provider
+    if (useGoogleApi) {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: apiModelId,
-          messages: [
+          contents: [
             {
-              role: "user",
-              content: [
-                { type: "text", text: promptText },
+              parts: [
+                { text: promptText },
                 {
-                  type: "image_url",
-                  image_url: {
-                    url: `data:${mimeType};base64,${image}`,
+                  inlineData: {
+                    mimeType,
+                    data: image,
                   },
                 },
               ],
             },
           ],
-          max_tokens: 300,
+          generationConfig: {
+            maxOutputTokens: 300,
+          },
         }),
       });
 
       if (!response.ok) {
         const errorData = await response.json() as unknown;
-        throw new Error(`${provider.toUpperCase()} API returned status ${response.status}: ${JSON.stringify(errorData)}`);
+        throw new Error(`Gemini API returned status ${response.status}: ${JSON.stringify(errorData)}`);
       }
 
-      const data = await response.json() as { choices?: { message?: { content?: string } }[] };
-      const description = data.choices?.[0]?.message?.content?.trim() || "";
+      const data = await response.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+      const description = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
       return NextResponse.json({ description });
     } else if (provider === "anthropic") {
       const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -191,41 +204,39 @@ export async function POST(req: Request) {
       const data = await response.json() as { content?: { text?: string }[] };
       const description = data.content?.[0]?.text?.trim() || "";
       return NextResponse.json({ description });
-    } else if (provider === "google" || provider === "gemini") {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelId || "gemini-1.5-flash"}:generateContent?key=${apiKey}`, {
+    } else {
+      const response = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
-          contents: [
+          model: modelId,
+          messages: [
             {
-              parts: [
-                { text: promptText },
+              role: "user",
+              content: [
+                { type: "text", text: promptText },
                 {
-                  inlineData: {
-                    mimeType,
-                    data: image,
+                  type: "image_url",
+                  image_url: {
+                    url: `data:${mimeType};base64,${image}`,
                   },
                 },
               ],
             },
           ],
-          generationConfig: {
-            maxOutputTokens: 300,
-          },
+          max_tokens: 300,
         }),
       });
 
       if (!response.ok) {
         const errorData = await response.json() as unknown;
-        throw new Error(`Gemini API returned status ${response.status}: ${JSON.stringify(errorData)}`);
+        throw new Error(`${provider.toUpperCase()} API returned status ${response.status}: ${JSON.stringify(errorData)}`);
       }
 
-      const data = await response.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-      const description = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+      const data = await response.json() as { choices?: { message?: { content?: string } }[] };
+      const description = data.choices?.[0]?.message?.content?.trim() || "";
       return NextResponse.json({ description });
     }
-
-    return NextResponse.json({ error: `Unsupported provider: ${provider}` }, { status: 400 });
   } catch (error) {
     console.error("Error in describe-image API:", error);
     return NextResponse.json({ error: String(error) }, { status: 500 });
