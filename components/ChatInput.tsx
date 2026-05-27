@@ -119,6 +119,74 @@ function isVisionModel(provider: string, modelId: string): boolean {
   return false;
 }
 
+function parseDescriptionToJSON(text: string): string {
+  let coreSubject = "";
+  let clothing = "";
+  let location = "";
+  let background = "";
+  let lighting = "";
+  let style = "";
+
+  // Clean Markdown notations
+  const cleanText = text.replace(/[\*\#\>\-\`]/g, " ").replace(/\s+/g, " ").trim();
+
+  // Extract core_subject
+  const subjectMatch = cleanText.match(/(?:主角是|主体是|画面中是|一个|一位|一幅|主角为|主体为|核心焦点为|核心为)([^，。；]+)/i);
+  coreSubject = subjectMatch ? subjectMatch[1].trim() : "";
+
+  // Extract clothing
+  const clothingMatch = cleanText.match(/(?:身穿|身着|穿着|身披|着装为|服装为|衣服为|衣服是|身穿一袭)([^，。；]+)/i);
+  clothing = clothingMatch ? clothingMatch[1].trim() : "";
+
+  // Extract location
+  const locationMatch = cleanText.match(/(?:在|位于|置身于|场景是|地点是|背景是|场景为|位置为|居中放置)([^，。；]{2,20})(?:中|里|上|下|旁|前|后|，|。|；)/i);
+  location = locationMatch ? locationMatch[1].trim() : "";
+
+  // Extract background
+  const backgroundMatch = cleanText.match(/(?:背景是|背景为|背景中包含|背景有|配景为|背景采用)([^。；，]+)/i);
+  background = backgroundMatch ? backgroundMatch[1].trim() : "";
+
+  // Extract lighting
+  const lightingMatch = cleanText.match(/(?:光线|光影|阳光|照射|照明|光效|光环|散发出)([^，。；]+)/i);
+  lighting = lightingMatch ? lightingMatch[1].trim() : "";
+
+  // Extract style
+  const styleMatch = cleanText.match(/(?:风格|画风|设计风格|视觉风格|呈现出|表现为|采用)([^，。；]+)/i);
+  style = styleMatch ? styleMatch[1].trim() : "";
+
+  // Fallbacks using sentence segments
+  const sentences = cleanText.split(/[，。；]/).map(s => s.trim()).filter(Boolean);
+  if (!coreSubject && sentences.length > 0) coreSubject = sentences[0];
+  if (!location && sentences.length > 1) location = sentences[1];
+  
+  if (!style) {
+    if (cleanText.includes("摄影")) style = "写实摄影肖像";
+    else if (cleanText.includes("插画")) style = "动漫手绘插画";
+    else if (cleanText.includes("界面") || cleanText.includes("设计")) style = "UI界面设计";
+    else style = "现代艺术风格";
+  }
+
+  // Fallback defaults to ensure neatness
+  if (!clothing) clothing = cleanText.includes("衣服") || cleanText.includes("身着") ? "特定款式服装" : "无特定装扮";
+  if (!location) location = "无特定位置场景";
+  if (!background) background = "纯色或虚化背景";
+  if (!lighting) lighting = "自然漫反射光照";
+
+  const jsonObj = {
+    image_prompt: {
+      core_subject: coreSubject,
+      clothing: clothing,
+      location: location,
+      background: background,
+      lighting: lighting,
+      style: style,
+      prompt: cleanText
+    }
+  };
+
+  return JSON.stringify(jsonObj, null, 2);
+}
+
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, modelNames, modelList, onModelChange,
   onCompact, onAbortCompaction, isCompacting, compactError, toolPreset, onToolPresetChange,
@@ -137,6 +205,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [promptModalOpen, setPromptModalOpen] = useState(false);
   const [promptModalText, setPromptModalText] = useState("");
   const [copySuccess, setCopySuccess] = useState(false);
+  const [promptTab, setPromptTab] = useState<"text" | "json">("text");
 
   useEffect(() => {
     if (describeError) {
@@ -322,6 +391,7 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
       setPromptModalText(data.description);
       setPromptModalOpen(true);
       setCopySuccess(false);
+      setPromptTab("text");
 
     } catch (err: any) {
       console.error(err);
@@ -1149,175 +1219,213 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
       </div>
 
       {/* 🪄 Premium Image Reverse-Prompt Modal */}
-      {promptModalOpen && (
-        <div style={{
-          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-          background: "rgba(0, 0, 0, 0.45)", backdropFilter: "blur(4px)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          zIndex: 9999, padding: 16,
-          animation: "fadeIn 0.2s ease-out",
-        }}>
-          <style>{`
-            @keyframes fadeIn {
-              from { opacity: 0; }
-              to { opacity: 1; }
-            }
-            @keyframes scaleIn {
-              from { transform: scale(0.96); opacity: 0; }
-              to { transform: scale(1); opacity: 1; }
-            }
-          `}</style>
+      {promptModalOpen && (() => {
+        const jsonText = parseDescriptionToJSON(promptModalText);
+        const activeText = promptTab === "text" ? promptModalText : jsonText;
+
+        return (
           <div style={{
-            background: "var(--bg-panel)",
-            border: "1px solid var(--border)",
-            borderRadius: 16,
-            width: "100%",
-            maxWidth: 560,
-            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
-            display: "flex",
-            flexDirection: "column",
-            animation: "scaleIn 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)",
-            overflow: "hidden",
+            position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+            background: "rgba(0, 0, 0, 0.45)", backdropFilter: "blur(4px)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 9999, padding: 16,
+            animation: "fadeIn 0.2s ease-out",
           }}>
-            {/* Header */}
+            <style>{`
+              @keyframes fadeIn {
+                from { opacity: 0; }
+                to { opacity: 1; }
+              }
+              @keyframes scaleIn {
+                from { transform: scale(0.96); opacity: 0; }
+                to { transform: scale(1); opacity: 1; }
+              }
+            `}</style>
             <div style={{
-              padding: "16px 20px",
-              borderBottom: "1px solid var(--border)",
+              background: "var(--bg-panel)",
+              border: "1px solid var(--border)",
+              borderRadius: 16,
+              width: "100%",
+              maxWidth: 560,
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
               display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              background: "rgba(255,255,255,0.02)",
+              flexDirection: "column",
+              animation: "scaleIn 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)",
+              overflow: "hidden",
             }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 18 }}>🪄</span>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--text)" }}>图片反推提示词</h3>
+              {/* Header with Tabs */}
+              <div style={{
+                display: "flex",
+                borderBottom: "1px solid var(--border)",
+                background: "rgba(255,255,255,0.02)",
+                padding: "0 20px",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}>
+                <div style={{ display: "flex", gap: 16 }}>
+                  <button
+                    onClick={() => setPromptTab("text")}
+                    style={{
+                      padding: "16px 4px",
+                      border: "none",
+                      borderBottom: `2px solid ${promptTab === "text" ? "var(--accent)" : "transparent"}`,
+                      background: "none",
+                      color: promptTab === "text" ? "var(--text)" : "var(--text-muted)",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      transition: "color 0.15s, border-color 0.15s",
+                    }}
+                  >
+                    文本格式
+                  </button>
+                  <button
+                    onClick={() => setPromptTab("json")}
+                    style={{
+                      padding: "16px 4px",
+                      border: "none",
+                      borderBottom: `2px solid ${promptTab === "json" ? "var(--accent)" : "transparent"}`,
+                      background: "none",
+                      color: promptTab === "json" ? "var(--text)" : "var(--text-muted)",
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      transition: "color 0.15s, border-color 0.15s",
+                    }}
+                  >
+                    JSON 格式
+                  </button>
+                </div>
+                
+                <button
+                  onClick={() => setPromptModalOpen(false)}
+                  style={{
+                    background: "none", border: "none", color: "var(--text-muted)",
+                    cursor: "pointer", display: "flex", alignItems: "center", padding: 4,
+                    borderRadius: "50%", transition: "background 0.15s",
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = "var(--bg-hover)"}
+                  onMouseLeave={(e) => e.currentTarget.style.background = "none"}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
               </div>
-              <button
-                onClick={() => setPromptModalOpen(false)}
-                style={{
-                  background: "none", border: "none", color: "var(--text-muted)",
-                  cursor: "pointer", display: "flex", alignItems: "center", padding: 4,
-                  borderRadius: "50%", transition: "background 0.15s",
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = "var(--bg-hover)"}
-                onMouseLeave={(e) => e.currentTarget.style.background = "none"}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
 
-            {/* Content Body */}
-            <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-                视觉大模型已为您反推解析出以下结构化 UI 提示词：
+              {/* Content Body */}
+              <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                  {promptTab === "text" 
+                    ? "视觉大模型已为您反推解析出以下结构化文本提示词：" 
+                    : "已将提示词自动分词并重构为以下 image_prompt JSON 结构："}
+                </div>
+                <textarea
+                  readOnly
+                  value={activeText}
+                  style={{
+                    width: "100%",
+                    height: 220,
+                    padding: 12,
+                    background: "var(--bg)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    fontSize: 13,
+                    lineHeight: "1.6",
+                    color: "var(--text)",
+                    resize: "none",
+                    outline: "none",
+                    fontFamily: promptTab === "json" ? "var(--font-mono), monospace" : "inherit",
+                  }}
+                />
               </div>
-              <textarea
-                readOnly
-                value={promptModalText}
-                style={{
-                  width: "100%",
-                  height: 180,
-                  padding: 12,
-                  background: "var(--bg)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 10,
-                  fontSize: 13,
-                  lineHeight: "1.6",
-                  color: "var(--text)",
-                  resize: "none",
-                  outline: "none",
-                  fontFamily: "inherit",
-                }}
-              />
-            </div>
 
-            {/* Footer Actions */}
-            <div style={{
-              padding: "16px 20px",
-              borderTop: "1px solid var(--border)",
-              background: "rgba(255,255,255,0.01)",
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: 10,
-            }}>
-              <button
-                onClick={() => {
-                  setValue((v) => v + (v ? "\n\n" : "") + promptModalText);
-                  setPromptModalOpen(false);
-                  requestAnimationFrame(() => {
-                    if (textareaRef.current) {
-                      textareaRef.current.focus();
-                      textareaRef.current.style.height = "auto";
-                      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+              {/* Footer Actions */}
+              <div style={{
+                padding: "16px 20px",
+                borderTop: "1px solid var(--border)",
+                background: "rgba(255,255,255,0.01)",
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 10,
+              }}>
+                <button
+                  onClick={() => {
+                    setValue((v) => v + (v ? "\n\n" : "") + activeText);
+                    setPromptModalOpen(false);
+                    requestAnimationFrame(() => {
+                      if (textareaRef.current) {
+                        textareaRef.current.focus();
+                        textareaRef.current.style.height = "auto";
+                        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+                      }
+                    });
+                  }}
+                  style={{
+                    padding: "8px 16px",
+                    background: "rgba(129,140,248,0.1)",
+                    border: "1px solid rgba(129,140,248,0.25)",
+                    borderRadius: 8,
+                    color: "rgb(99,102,241)",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    transition: "background 0.12s",
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = "rgba(129,140,248,0.18)"}
+                  onMouseLeave={(e) => e.currentTarget.style.background = "rgba(129,140,248,0.1)"}
+                >
+                  插入到输入框
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(activeText);
+                      setCopySuccess(true);
+                      setTimeout(() => setCopySuccess(false), 2000);
+                    } catch (err) {
+                      console.error("Failed to copy text:", err);
                     }
-                  });
-                }}
-                style={{
-                  padding: "8px 16px",
-                  background: "rgba(129,140,248,0.1)",
-                  border: "1px solid rgba(129,140,248,0.25)",
-                  borderRadius: 8,
-                  color: "rgb(99,102,241)",
-                  cursor: "pointer",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  transition: "background 0.12s",
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = "rgba(129,140,248,0.18)"}
-                onMouseLeave={(e) => e.currentTarget.style.background = "rgba(129,140,248,0.1)"}
-              >
-                插入到输入框
-              </button>
-              <button
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(promptModalText);
-                    setCopySuccess(true);
-                    setTimeout(() => setCopySuccess(false), 2000);
-                  } catch (err) {
-                    console.error("Failed to copy text:", err);
-                  }
-                }}
-                style={{
-                  padding: "8px 18px",
-                  background: copySuccess ? "#10B981" : "var(--accent)",
-                  border: "none",
-                  borderRadius: 8,
-                  color: "#fff",
-                  cursor: "pointer",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  transition: "background 0.15s",
-                }}
-                onMouseEnter={(e) => { if (!copySuccess) e.currentTarget.style.filter = "brightness(1.15)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.filter = "none"; }}
-              >
-                {copySuccess ? (
-                  <>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    已复制！
-                  </>
-                ) : (
-                  <>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                    </svg>
-                    复制提示词
-                  </>
-                )}
-              </button>
+                  }}
+                  style={{
+                    padding: "8px 18px",
+                    background: copySuccess ? "#10B981" : "var(--accent)",
+                    border: "none",
+                    borderRadius: 8,
+                    color: "#fff",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    transition: "background 0.15s",
+                  }}
+                  onMouseEnter={(e) => { if (!copySuccess) e.currentTarget.style.filter = "brightness(1.15)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.filter = "none"; }}
+                >
+                  {copySuccess ? (
+                    <>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                      已复制！
+                    </>
+                  ) : (
+                    <>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                      </svg>
+                      复制提示词
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 });
