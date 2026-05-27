@@ -17,7 +17,7 @@ npm install -g @zwbigi/pi-agent-xy
 pi-agent-xy
 ```
 
-启动后打开 [http://localhost:30141](http://localhost:30141)。
+启动后打开 [http://localhost:30142](http://localhost:30142)。
 
 **可选参数：**
 
