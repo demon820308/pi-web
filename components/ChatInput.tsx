@@ -134,6 +134,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
   const [describingIndices, setDescribingIndices] = useState<Record<number, boolean>>({});
   const [describeError, setDescribeError] = useState<string | null>(null);
+  const [promptModalOpen, setPromptModalOpen] = useState(false);
+  const [promptModalText, setPromptModalText] = useState("");
+  const [copySuccess, setCopySuccess] = useState(false);
 
   useEffect(() => {
     if (describeError) {
@@ -314,21 +317,19 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
       if (!res.ok) {
         throw new Error(data.error || "Failed to describe image");
       }
-      setValue((v) => v + (v ? "\n\n" : "") + data.description);
-      requestAnimationFrame(() => {
-        if (textareaRef.current) {
-          textareaRef.current.focus();
-          textareaRef.current.style.height = "auto";
-          textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
-        }
-      });
+      
+      // Open the visual modal with the reverse-prompt instead of auto-injecting it silently
+      setPromptModalText(data.description);
+      setPromptModalOpen(true);
+      setCopySuccess(false);
+
     } catch (err: any) {
       console.error(err);
       setDescribeError(err.message || String(err));
     } finally {
       setDescribingIndices((prev) => ({ ...prev, [index]: false }));
     }
-  }, [attachedImages, model, modelList]);
+  }, [attachedImages, model]);
 
   const handleSend = useCallback(() => {
     const msg = value.trim();
@@ -1146,6 +1147,177 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
 
         </div>
       </div>
+
+      {/* 🪄 Premium Image Reverse-Prompt Modal */}
+      {promptModalOpen && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+          background: "rgba(0, 0, 0, 0.45)", backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          zIndex: 9999, padding: 16,
+          animation: "fadeIn 0.2s ease-out",
+        }}>
+          <style>{`
+            @keyframes fadeIn {
+              from { opacity: 0; }
+              to { opacity: 1; }
+            }
+            @keyframes scaleIn {
+              from { transform: scale(0.96); opacity: 0; }
+              to { transform: scale(1); opacity: 1; }
+            }
+          `}</style>
+          <div style={{
+            background: "var(--bg-panel)",
+            border: "1px solid var(--border)",
+            borderRadius: 16,
+            width: "100%",
+            maxWidth: 560,
+            boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+            display: "flex",
+            flexDirection: "column",
+            animation: "scaleIn 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)",
+            overflow: "hidden",
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: "16px 20px",
+              borderBottom: "1px solid var(--border)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              background: "rgba(255,255,255,0.02)",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 18 }}>🪄</span>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--text)" }}>图片反推提示词</h3>
+              </div>
+              <button
+                onClick={() => setPromptModalOpen(false)}
+                style={{
+                  background: "none", border: "none", color: "var(--text-muted)",
+                  cursor: "pointer", display: "flex", alignItems: "center", padding: 4,
+                  borderRadius: "50%", transition: "background 0.15s",
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = "var(--bg-hover)"}
+                onMouseLeave={(e) => e.currentTarget.style.background = "none"}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                视觉大模型已为您反推解析出以下结构化 UI 提示词：
+              </div>
+              <textarea
+                readOnly
+                value={promptModalText}
+                style={{
+                  width: "100%",
+                  height: 180,
+                  padding: 12,
+                  background: "var(--bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 10,
+                  fontSize: 13,
+                  lineHeight: "1.6",
+                  color: "var(--text)",
+                  resize: "none",
+                  outline: "none",
+                  fontFamily: "inherit",
+                }}
+              />
+            </div>
+
+            {/* Footer Actions */}
+            <div style={{
+              padding: "16px 20px",
+              borderTop: "1px solid var(--border)",
+              background: "rgba(255,255,255,0.01)",
+              display: "flex",
+              justifyContent: "flex-end",
+              gap: 10,
+            }}>
+              <button
+                onClick={() => {
+                  setValue((v) => v + (v ? "\n\n" : "") + promptModalText);
+                  setPromptModalOpen(false);
+                  requestAnimationFrame(() => {
+                    if (textareaRef.current) {
+                      textareaRef.current.focus();
+                      textareaRef.current.style.height = "auto";
+                      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+                    }
+                  });
+                }}
+                style={{
+                  padding: "8px 16px",
+                  background: "rgba(129,140,248,0.1)",
+                  border: "1px solid rgba(129,140,248,0.25)",
+                  borderRadius: 8,
+                  color: "rgb(99,102,241)",
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  transition: "background 0.12s",
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = "rgba(129,140,248,0.18)"}
+                onMouseLeave={(e) => e.currentTarget.style.background = "rgba(129,140,248,0.1)"}
+              >
+                插入到输入框
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(promptModalText);
+                    setCopySuccess(true);
+                    setTimeout(() => setCopySuccess(false), 2000);
+                  } catch (err) {
+                    console.error("Failed to copy text:", err);
+                  }
+                }}
+                style={{
+                  padding: "8px 18px",
+                  background: copySuccess ? "#10B981" : "var(--accent)",
+                  border: "none",
+                  borderRadius: 8,
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  transition: "background 0.15s",
+                }}
+                onMouseEnter={(e) => { if (!copySuccess) e.currentTarget.style.filter = "brightness(1.15)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.filter = "none"; }}
+              >
+                {copySuccess ? (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    已复制！
+                  </>
+                ) : (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                    复制提示词
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
