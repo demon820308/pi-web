@@ -94,8 +94,7 @@ function isVisionModel(provider: string, modelId: string): boolean {
   // 3. Gemini / Google Vision Models
   if (pid.includes("google") || pid.includes("gemini")) {
     if (
-      mid.includes("gemini-1.5") ||
-      mid.includes("gemini-2.0") ||
+      mid.includes("gemini-") ||
       mid.includes("vision")
     ) {
       return true;
@@ -108,8 +107,7 @@ function isVisionModel(provider: string, modelId: string): boolean {
     mid.includes("vision") ||
     mid.includes("gpt-4o") ||
     mid.includes("claude-3") ||
-    mid.includes("gemini-1.5") ||
-    mid.includes("gemini-2.0") ||
+    mid.includes("gemini-") ||
     mid.includes("llama-3.2-11b") ||
     mid.includes("llama-3.2-90b") ||
     mid.includes("pixtral") ||
