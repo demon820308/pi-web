@@ -109,6 +109,16 @@ export async function POST(req: Request) {
         }
       }
 
+      let apiModelId = modelId || "gpt-4o-mini";
+      if (
+        apiModelId.toLowerCase().includes("mimo") ||
+        provider.includes("xiaomi-token-plan") ||
+        provider.includes("mimo") ||
+        provider.includes("lingya")
+      ) {
+        apiModelId = "gpt-4o-mini";
+      }
+
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
@@ -116,7 +126,7 @@ export async function POST(req: Request) {
           "Authorization": `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: modelId || "mimo-v2.5",
+          model: apiModelId,
           messages: [
             {
               role: "user",
