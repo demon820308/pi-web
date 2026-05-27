@@ -1099,7 +1099,31 @@ function SessionItem({
   const [renameValue, setRenameValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [lockedState, setLockedState] = useState(session.locked);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Sync state if session prop updates
+  useEffect(() => {
+    setLockedState(session.locked);
+  }, [session.locked]);
+
+  const handleLockToggle = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newStatus = !lockedState;
+    setLockedState(newStatus);
+    session.locked = newStatus; // optimistic update on reference
+    try {
+      await fetch(`/api/sessions/${encodeURIComponent(session.id)}/lock`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locked: newStatus }),
+      });
+      onRenamed?.(); // refresh sidebar list
+    } catch {
+      setLockedState(!newStatus);
+      session.locked = !newStatus;
+    }
+  }, [lockedState, session, onRenamed]);
 
   const title = session.name || session.firstMessage.slice(0, 50) || session.id.slice(0, 12);
 
@@ -1262,10 +1286,16 @@ function SessionItem({
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
                 color: "var(--text)",
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
               }}
               title={title}
             >
-              {title}
+              {lockedState && (
+                <span title="本会话已被锁定，无法删除。请先解锁！" style={{ display: "inline-flex", fontSize: 10, flexShrink: 0 }}>🔒</span>
+              )}
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
             </div>
             <div style={{ marginTop: 2, display: "flex", gap: 8, color: "var(--text-dim)", fontSize: 11 }}>
               <span title={session.modified}>{formatRelativeTime(session.modified)}</span>
@@ -1296,6 +1326,45 @@ function SessionItem({
           {/* Action buttons — shown on hover */}
           {hovered && (
             <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+              {/* Lock/Unlock Toggle Button */}
+              <button
+                onClick={handleLockToggle}
+                title={lockedState ? "解锁会话 (Unlock session)" : "锁定会话 (Lock session)"}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 32, height: 32, padding: 0,
+                  background: "var(--bg-hover)", border: "1px solid var(--border)",
+                  borderRadius: 7,
+                  color: lockedState ? "var(--accent)" : "var(--text-muted)",
+                  cursor: "pointer", flexShrink: 0,
+                  transition: "background 0.12s, color 0.12s, border-color 0.12s",
+                  borderColor: lockedState ? "rgba(37,99,235,0.25)" : "var(--border)",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "var(--bg-selected)";
+                  e.currentTarget.style.color = "var(--accent)";
+                  e.currentTarget.style.borderColor = "rgba(37,99,235,0.35)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.color = lockedState ? "var(--accent)" : "var(--text-muted)";
+                  e.currentTarget.style.borderColor = lockedState ? "rgba(37,99,235,0.25)" : "var(--border)";
+                }}
+              >
+                {lockedState ? (
+                  /* Padlock Locked Icon */
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  </svg>
+                ) : (
+                  /* Padlock Unlocked Icon */
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+                  </svg>
+                )}
+              </button>
               <button
                 onClick={startRename}
                 title="Rename"
@@ -1323,22 +1392,28 @@ function SessionItem({
                 </svg>
               </button>
               <button
-                onClick={handleDeleteClick}
-                title="Delete"
+                onClick={lockedState ? undefined : handleDeleteClick}
+                disabled={lockedState}
+                title={lockedState ? "本会话已被锁定，无法删除。请先解锁！" : "Delete"}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
                   width: 32, height: 32, padding: 0,
                   background: "var(--bg-hover)", border: "1px solid var(--border)",
-                  borderRadius: 7, color: "var(--text-muted)",
-                  cursor: "pointer", flexShrink: 0,
+                  borderRadius: 7,
+                  color: lockedState ? "var(--text-dim)" : "var(--text-muted)",
+                  cursor: lockedState ? "not-allowed" : "pointer",
+                  flexShrink: 0,
+                  opacity: lockedState ? 0.35 : 1,
                   transition: "background 0.12s, color 0.12s, border-color 0.12s",
                 }}
                 onMouseEnter={(e) => {
+                  if (lockedState) return;
                   e.currentTarget.style.background = "rgba(239,68,68,0.08)";
                   e.currentTarget.style.color = "#ef4444";
                   e.currentTarget.style.borderColor = "rgba(239,68,68,0.35)";
                 }}
                 onMouseLeave={(e) => {
+                  if (lockedState) return;
                   e.currentTarget.style.background = "var(--bg-hover)";
                   e.currentTarget.style.color = "var(--text-muted)";
                   e.currentTarget.style.borderColor = "var(--border)";

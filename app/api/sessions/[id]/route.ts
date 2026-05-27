@@ -9,6 +9,7 @@ import {
   listAllSessions,
 } from "@/lib/session-reader";
 import { getRpcSession } from "@/lib/rpc-manager";
+import { isSessionLocked } from "@/lib/session-lock";
 
 export async function GET(
   req: Request,
@@ -48,6 +49,7 @@ export async function GET(
           })()
         : "(no messages)",
       parentSessionId,
+      locked: isSessionLocked(id),
     } : null;
 
     const url = new URL(req.url);
@@ -106,6 +108,10 @@ export async function DELETE(
 ) {
   const { id } = await params;
   try {
+    if (isSessionLocked(id)) {
+      return NextResponse.json({ error: "Session is locked and cannot be deleted" }, { status: 400 });
+    }
+
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });

@@ -181,6 +181,7 @@ export interface SessionInfo {
   messageCount: number;
   firstMessage: string;
   parentSessionId?: string; // set if this session was forked from another
+  locked?: boolean;
 }
 
 export interface SessionContext {
