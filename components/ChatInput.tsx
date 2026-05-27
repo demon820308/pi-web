@@ -189,32 +189,79 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     },
   }));
 
+function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, quality = 0.8): Promise<{ data: string; mimeType: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Failed to get canvas 2D context"));
+          return;
+        }
+
+        // Draw a solid white background (crucial for preserving transparent PNGs correctly)
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, width, height);
+
+        // Draw the downscaled image
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Convert to space-efficient lossy JPEG base64
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        const commaIndex = dataUrl.indexOf(",");
+        const base64 = commaIndex !== -1 ? dataUrl.substring(commaIndex + 1) : dataUrl;
+
+        resolve({
+          data: base64,
+          mimeType: "image/jpeg",
+        });
+      };
+      img.onerror = (err) => reject(err);
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+}
+
   const processImageFiles = useCallback(async (files: File[]) => {
     const imageFiles = files.filter((f) => f.type.startsWith("image/"));
     if (!imageFiles.length) return;
     try {
       const newImages = await Promise.all(
         imageFiles.map(async (file) => {
-          return new Promise<AttachedImage>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const result = reader.result as string;
-              const commaIndex = result.indexOf(",");
-              const base64 = commaIndex !== -1 ? result.substring(commaIndex + 1) : result;
-              resolve({
-                data: base64,
-                mimeType: file.type,
-                previewUrl: URL.createObjectURL(file),
-              });
-            };
-            reader.onerror = (err) => reject(err);
-            reader.readAsDataURL(file);
-          });
+          const compressed = await compressAndResizeImage(file);
+          return {
+            data: compressed.data,
+            mimeType: compressed.mimeType,
+            previewUrl: URL.createObjectURL(file),
+          };
         })
       );
       setAttachedImages((prev) => [...prev, ...newImages]);
     } catch (e) {
-      console.error("Failed to process image files:", e);
+      console.error("Failed to process and compress image files:", e);
     }
   }, []);
 
