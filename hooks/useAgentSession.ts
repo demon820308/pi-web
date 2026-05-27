@@ -6,74 +6,6 @@ import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
 import type { ToolEntry } from "@/components/ToolPanel";
 
-function parseDescriptionToJSON(text: string): string {
-  let coreSubject = "";
-  let clothing = "";
-  let location = "";
-  let background = "";
-  let lighting = "";
-  let style = "";
-
-  // Clean Markdown notations
-  const cleanText = text.replace(/[\*\#\>\-\`]/g, " ").replace(/\s+/g, " ").trim();
-
-  // Extract core_subject
-  const subjectMatch = cleanText.match(/(?:主角是|主体是|画面中是|一个|一位|一幅|主角为|主体为|核心焦点为|核心为)([^，。；]+)/i);
-  coreSubject = subjectMatch ? subjectMatch[1].trim() : "";
-
-  // Extract clothing
-  const clothingMatch = cleanText.match(/(?:身穿|身着|穿着|身披|着装为|服装为|衣服为|衣服是|身穿一袭)([^，。；]+)/i);
-  clothing = clothingMatch ? clothingMatch[1].trim() : "";
-
-  // Extract location
-  const locationMatch = cleanText.match(/(?:在|位于|置身于|场景是|地点是|背景是|场景为|位置为|居中放置)([^，。；]{2,20})(?:中|里|上|下|旁|前|后|，|。|；)/i);
-  location = locationMatch ? locationMatch[1].trim() : "";
-
-  // Extract background
-  const backgroundMatch = cleanText.match(/(?:背景是|背景为|背景中包含|背景有|配景为|背景采用)([^。；，]+)/i);
-  background = backgroundMatch ? backgroundMatch[1].trim() : "";
-
-  // Extract lighting
-  const lightingMatch = cleanText.match(/(?:光线|光影|阳光|照射|照明|光效|光环|散发出)([^，。；]+)/i);
-  lighting = lightingMatch ? lightingMatch[1].trim() : "";
-
-  // Extract style
-  const styleMatch = cleanText.match(/(?:风格|画风|设计风格|视觉风格|呈现出|表现为|采用)([^，。；]+)/i);
-  style = styleMatch ? styleMatch[1].trim() : "";
-
-  // Fallbacks using sentence segments
-  const sentences = cleanText.split(/[，。；]/).map(s => s.trim()).filter(Boolean);
-  if (!coreSubject && sentences.length > 0) coreSubject = sentences[0];
-  if (!location && sentences.length > 1) location = sentences[1];
-  
-  if (!style) {
-    if (cleanText.includes("摄影")) style = "写实摄影肖像";
-    else if (cleanText.includes("插画")) style = "动漫手绘插画";
-    else if (cleanText.includes("界面") || cleanText.includes("设计")) style = "UI界面设计";
-    else style = "现代艺术风格";
-  }
-
-  // Fallback defaults to ensure neatness
-  if (!clothing) clothing = cleanText.includes("衣服") || cleanText.includes("身着") ? "特定款式服装" : "无特定装扮";
-  if (!location) location = "无特定位置场景";
-  if (!background) background = "纯色或虚化背景";
-  if (!lighting) lighting = "自然漫反射光照";
-
-  const jsonObj = {
-    image_prompt: {
-      core_subject: coreSubject,
-      clothing: clothing,
-      location: location,
-      background: background,
-      lighting: lighting,
-      style: style,
-      prompt: cleanText
-    }
-  };
-
-  return JSON.stringify(jsonObj, null, 2);
-}
-
 export interface SessionData {
   sessionId: string;
   filePath: string;
@@ -435,25 +367,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
       const joinedDescriptions = descriptions.filter(Boolean).join("\n\n");
       if (joinedDescriptions) {
-        const jsonPrompt = parseDescriptionToJSON(joinedDescriptions);
-        return `[图片分析提示词（文本格式）]：
+        return `[图片分析提示词]：
 ${joinedDescriptions}
-
-[图片分析提示词（JSON格式）]：
-${jsonPrompt}
 
 ---
-请在回复的开头，以如下格式分别输出“文本格式”和“JSON 格式”的反推提示词（均必须使用标准的 markdown 代码块包裹，以便用户一键复制），然后再开始执行您的任务分析与代码编写：
-
-**图片反推提示词：**
-\`\`\`text
-${joinedDescriptions}
-\`\`\`
-
-**JSON 格式提示词：**
-\`\`\`json
-${jsonPrompt}
-\`\`\`
+请在回复的开头以“**图片反推提示词：**”的形式完整输出上述提示词，然后再开始您的任务分析与代码编写。
 
 ${message.trim() ? `用户原始输入：\n${message.trim()}` : ""}`;
       }
