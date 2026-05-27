@@ -172,6 +172,15 @@ function parseDescriptionToJSON(text: string): string {
   if (!background) background = "纯色或虚化背景";
   if (!lighting) lighting = "自然漫反射光照";
 
+  // Synthesize a structured Midjourney-style prompt matching the user's template
+  // Example: 一张{style}，一位{coreSubject}在{location}。她/他{clothing}。背景是{background}。{lighting}。
+  let synthesizedPrompt = "";
+  if (style.includes("UI") || style.includes("界面") || style.includes("设计")) {
+    synthesizedPrompt = `一个精心设计的${style}，主体是${coreSubject}，位于${location}。页面配色与装扮采用${clothing}。背景是${background}。光影效果呈现为${lighting}。整体布局美观，浅景深虚化。`;
+  } else {
+    synthesizedPrompt = `一张${style}，一位${coreSubject}在${location}。穿着${clothing}。背景是${background}。${lighting}，浅景深虚化。`;
+  }
+
   const jsonObj = {
     image_prompt: {
       core_subject: coreSubject,
@@ -180,7 +189,7 @@ function parseDescriptionToJSON(text: string): string {
       background: background,
       lighting: lighting,
       style: style,
-      prompt: cleanText
+      prompt: synthesizedPrompt
     }
   };
 
