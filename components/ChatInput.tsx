@@ -72,6 +72,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [describingIndices, setDescribingIndices] = useState<Record<number, boolean>>({});
+  const [describeError, setDescribeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (describeError) {
+      const timer = setTimeout(() => setDescribeError(null), 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [describeError]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -158,6 +167,37 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       return [];
     });
   }, []);
+
+  const handleDescribe = useCallback(async (index: number) => {
+    const img = attachedImages[index];
+    if (!img) return;
+    setDescribingIndices((prev) => ({ ...prev, [index]: true }));
+    setDescribeError(null);
+    try {
+      const res = await fetch("/api/agent/describe-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: img.data, mimeType: img.mimeType }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to describe image");
+      }
+      setValue((v) => v + (v ? "\n\n" : "") + data.description);
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.style.height = "auto";
+          textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+        }
+      });
+    } catch (err: any) {
+      console.error(err);
+      setDescribeError(err.message || String(err));
+    } finally {
+      setDescribingIndices((prev) => ({ ...prev, [index]: false }));
+    }
+  }, [attachedImages]);
 
   const handleSend = useCallback(() => {
     const msg = value.trim();
@@ -301,33 +341,120 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             Retrying ({retryInfo.attempt}/{retryInfo.maxAttempts})…{retryInfo.errorMessage && <span style={{ opacity: 0.7, marginLeft: 4 }}>— {retryInfo.errorMessage}</span>}
           </div>
         )}
+        {/* Image description error banner */}
+        {describeError && (
+          <div style={{
+            marginBottom: 8, padding: "8px 12px",
+            background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)",
+            borderRadius: 8, fontSize: 12, color: "rgba(220,38,38,0.9)",
+            display: "flex", alignItems: "center", gap: 6,
+            position: "relative",
+          }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span style={{ flex: 1 }}>{describeError}</span>
+            <button
+              onClick={() => setDescribeError(null)}
+              style={{
+                background: "none", border: "none", color: "rgba(220,38,38,0.6)",
+                cursor: "pointer", display: "flex", alignItems: "center", padding: 2,
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        )}
+
         {/* Image previews */}
         {attachedImages.length > 0 && (
           <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-            {attachedImages.map((img, i) => (
-              <div key={i} style={{ position: "relative", flexShrink: 0 }}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={img.previewUrl}
-                  alt=""
-                  style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)", display: "block" }}
-                />
-                <button
-                  onClick={() => removeImage(i)}
-                  style={{
-                    position: "absolute", top: -4, right: -4,
-                    width: 16, height: 16, borderRadius: "50%",
-                    background: "var(--bg-panel)", border: "1px solid var(--border)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    cursor: "pointer", padding: 0, color: "var(--text-muted)",
-                  }}
-                >
-                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                    <line x1="1" y1="1" x2="7" y2="7" /><line x1="7" y1="1" x2="1" y2="7" />
-                  </svg>
-                </button>
-              </div>
-            ))}
+            <style>{`
+              @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+              }
+            `}</style>
+            {attachedImages.map((img, i) => {
+              const isDescribing = !!describingIndices[i];
+              return (
+                <div key={i} style={{ position: "relative", flexShrink: 0 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={img.previewUrl}
+                    alt=""
+                    style={{
+                      width: 56,
+                      height: 56,
+                      objectFit: "cover",
+                      borderRadius: 6,
+                      border: "1px solid var(--border)",
+                      display: "block",
+                      filter: isDescribing ? "brightness(0.4)" : "none",
+                      transition: "filter 0.2s",
+                    }}
+                  />
+                  {isDescribing ? (
+                    <div style={{
+                      position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: "rgba(0, 0, 0, 0.4)", borderRadius: 6,
+                    }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}>
+                        <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.2)" />
+                        <path d="M12 2a10 10 0 0 1 10 10" />
+                      </svg>
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => handleDescribe(i)}
+                        title="🪄 反推提示词"
+                        style={{
+                          position: "absolute", bottom: -4, left: -4,
+                          width: 20, height: 20, borderRadius: "50%",
+                          background: "var(--bg-panel)", border: "1px solid var(--border)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          cursor: "pointer", padding: 0, color: "var(--accent)",
+                          boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                          fontSize: 11,
+                          transition: "transform 0.15s, background-color 0.15s",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = "scale(1.15)";
+                          e.currentTarget.style.background = "var(--bg-hover)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = "scale(1)";
+                          e.currentTarget.style.background = "var(--bg-panel)";
+                        }}
+                      >
+                        🪄
+                      </button>
+                      <button
+                        onClick={() => removeImage(i)}
+                        style={{
+                          position: "absolute", top: -4, right: -4,
+                          width: 16, height: 16, borderRadius: "50%",
+                          background: "var(--bg-panel)", border: "1px solid var(--border)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          cursor: "pointer", padding: 0, color: "var(--text-muted)",
+                        }}
+                      >
+                        <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                          <line x1="1" y1="1" x2="7" y2="7" /><line x1="7" y1="1" x2="1" y2="7" />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
