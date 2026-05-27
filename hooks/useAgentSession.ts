@@ -339,6 +339,48 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [loadSession, onAgentEnd]);
   handleAgentEventRef.current = handleAgentEvent;
 
+  const getProcessedMessage = useCallback(async (message: string, images?: AttachedImage[]) => {
+    if (!images || images.length === 0) return message;
+    try {
+      const dynamicModel = modelList?.find(m => m.id === currentModel?.modelId && m.provider === currentModel?.provider);
+      const supportsVision = dynamicModel ? !!(dynamicModel as any).supportsVision : false;
+
+      const descriptions = await Promise.all(
+        images.map(async (img) => {
+          const res = await fetch("/api/agent/describe-image", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              image: img.data,
+              mimeType: img.mimeType,
+              ...(supportsVision && currentModel ? {
+                provider: currentModel.provider,
+                modelId: currentModel.modelId,
+              } : {}),
+            }),
+          });
+          if (!res.ok) throw new Error("Failed to auto-describe image");
+          const data = await res.json();
+          return data.description;
+        })
+      );
+
+      const joinedDescriptions = descriptions.filter(Boolean).join("\n\n");
+      if (joinedDescriptions) {
+        return `[图片分析提示词]：
+${joinedDescriptions}
+
+---
+请在回复的开头以“**图片反推提示词：**”的形式完整输出上述提示词，然后再开始您的任务分析与代码编写。
+
+${message.trim() ? `用户原始输入：\n${message.trim()}` : ""}`;
+      }
+    } catch (e) {
+      console.error("Failed to automatically describe images on send:", e);
+    }
+    return message;
+  }, [modelList, currentModel]);
+
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
     if (!message.trim() && !images?.length) return;
     if (agentRunning || sendingRef.current) return;
@@ -361,6 +403,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
 
     try {
+      const processedMessage = await getProcessedMessage(message, images);
+
       if (isNew && newSessionCwd) {
         const selectedModel = newSessionModel;
         if (selectedModel) setPendingModel(selectedModel);
@@ -372,7 +416,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           body: JSON.stringify({
             cwd: newSessionCwd,
             type: "prompt",
-            message,
+            message: processedMessage,
             toolNames,
             ...(piImages?.length ? { images: piImages } : {}),
             ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
@@ -401,7 +445,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         await connectEvents(session.id);
         sendAgentCommand(session.id, {
           type: "prompt",
-          message,
+          message: processedMessage,
           ...(piImages?.length ? { images: piImages } : {}),
         }).catch((e) => {
           console.error("Prompt command error:", e);
@@ -415,7 +459,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       dispatch({ type: "end" });
       sendingRef.current = false;
     }
-  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, onSessionCreated, opts.activeGemId]);
+  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, onSessionCreated, opts.activeGemId, getProcessedMessage]);
 
   const handleAbort = useCallback(async () => {
     const sid = sessionIdRef.current;
@@ -501,15 +545,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setMessages((prev) => [...prev, { role: "user", content: `[steer] ${message}`, timestamp: Date.now() } as AgentMessage]);
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
     try {
+      const processedMessage = await getProcessedMessage(message, images);
       await sendAgentCommand(sid, {
         type: "steer",
-        message,
+        message: processedMessage,
         ...(piImages?.length ? { images: piImages } : {}),
       });
     } catch (e) {
       console.error("Failed to steer:", e);
     }
-  }, []);
+  }, [getProcessedMessage]);
 
   const handleFollowUp = useCallback(async (message: string, images?: AttachedImage[]) => {
     const sid = sessionIdRef.current;
@@ -517,15 +562,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setMessages((prev) => [...prev, { role: "user", content: message, timestamp: Date.now() } as AgentMessage]);
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
     try {
+      const processedMessage = await getProcessedMessage(message, images);
       await sendAgentCommand(sid, {
         type: "follow_up",
-        message,
+        message: processedMessage,
         ...(piImages?.length ? { images: piImages } : {}),
       });
     } catch (e) {
       console.error("Failed to follow up:", e);
     }
-  }, []);
+  }, [getProcessedMessage]);
 
   const handleAbortCompaction = useCallback(async () => {
     const sid = sessionIdRef.current;
