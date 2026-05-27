@@ -166,19 +166,27 @@ function parseDescriptionToJSON(text: string): string {
     else style = "现代艺术风格";
   }
 
-  // Fallback defaults to ensure neatness
-  if (!clothing) clothing = cleanText.includes("衣服") || cleanText.includes("身着") ? "特定款式服装" : "无特定装扮";
-  if (!location) location = "无特定位置场景";
-  if (!background) background = "纯色或虚化背景";
-  if (!lighting) lighting = "自然漫反射光照";
+  // Fallback defaults to ensure neatness - removed all arbitrary added text.
+  // We keep them strictly empty if not found in the original vision response.
+  if (!clothing) clothing = "";
+  if (!location) location = "";
+  if (!background) background = "";
+  if (!lighting) lighting = "";
+  if (!style) style = "";
 
-  // Synthesize a structured Midjourney-style prompt matching the user's template
-  // Example: 一张{style}，一位{coreSubject}在{location}。她/他{clothing}。背景是{background}。{lighting}。
-  let synthesizedPrompt = "";
-  if (style.includes("UI") || style.includes("界面") || style.includes("设计")) {
-    synthesizedPrompt = `一个精心设计的${style}，主体是${coreSubject}，位于${location}。页面配色与装扮采用${clothing}。背景是${background}。光影效果呈现为${lighting}。整体布局美观，浅景深虚化。`;
-  } else {
-    synthesizedPrompt = `一张${style}，一位${coreSubject}在${location}。穿着${clothing}。背景是${background}。${lighting}，浅景深虚化。`;
+  // Synthesize a structured image prompt using strictly the available elements without any extra text addition
+  const promptParts = [
+    style ? style : "",
+    coreSubject ? coreSubject : "",
+    location ? location : "",
+    clothing ? clothing : "",
+    background ? background : "",
+    lighting ? lighting : ""
+  ].filter(Boolean);
+
+  let synthesizedPrompt = promptParts.join("，");
+  if (!synthesizedPrompt) {
+    synthesizedPrompt = cleanText;
   }
 
   const jsonObj = {
