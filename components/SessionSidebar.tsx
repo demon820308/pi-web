@@ -7,7 +7,7 @@ import { FileExplorer } from "./FileExplorer";
 interface Props {
   selectedSessionId: string | null;
   onSelectSession: (session: SessionInfo, isRestore?: boolean) => void;
-  onNewSession?: (sessionId: string, cwd: string) => void;
+  onNewSession?: (sessionId: string, cwd: string, gemId?: string | null) => void;
   initialSessionId?: string | null;
   onInitialRestoreDone?: () => void;
   refreshKey?: number;
@@ -17,6 +17,7 @@ interface Props {
   onOpenFile?: (filePath: string, fileName: string) => void;
   explorerRefreshKey?: number;
   onAtMention?: (relativePath: string) => void;
+  activeGemId?: string | null;
 }
 
 function formatRelativeTime(dateStr: string): string {
@@ -196,7 +197,10 @@ function PiAgentTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention }: Props) {
+import GemEditorModal from "./GemEditorModal";
+import type { GemProfile } from "@/lib/types";
+
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, activeGemId }: Props) {
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -209,6 +213,60 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [explorerOpen, setExplorerOpen] = useState(true);
   const [explorerKey, setExplorerKey] = useState(0);
+
+  // Gem-xY custom agent states
+  const [gems, setGems] = useState<GemProfile[]>([]);
+  const [modelList, setModelList] = useState<{ id: string; name: string; provider: string }[]>([]);
+  const [isGemModalOpen, setIsGemModalOpen] = useState(false);
+  const [editingGemId, setEditingGemId] = useState<string | null>(null);
+  const [gemsExpanded, setGemsExpanded] = useState(true);
+
+  // Load Gems
+  const loadGems = useCallback(async () => {
+    try {
+      const res = await fetch("/api/gem-xy");
+      if (!res.ok) throw new Error("Failed to load Gem-xY profiles");
+      const data = await res.json() as GemProfile[];
+      setGems(data);
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadGems();
+  }, [loadGems]);
+
+  // Load Models List (for editor configuration)
+  useEffect(() => {
+    fetch("/api/models")
+      .then((r) => r.json())
+      .then((d: { modelList?: { id: string; name: string; provider: string }[] }) => {
+        if (d.modelList) setModelList(d.modelList);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSelectGem = useCallback((gemId: string) => {
+    if (!selectedCwd) return;
+    const tempId = typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    onNewSession?.(tempId, selectedCwd, gemId);
+  }, [selectedCwd, onNewSession]);
+
+  const handleDeleteGem = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (!confirm("确定要删除这个智能体吗？")) return;
+    try {
+      const res = await fetch(`/api/gem-xy/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Delete failed");
+      loadGems();
+    } catch (err) {
+      console.error(err);
+      alert("删除失败");
+    }
+  };
   const [sessionRefreshDone, setSessionRefreshDone] = useState(false);
   const [explorerRefreshDone, setExplorerRefreshDone] = useState(false);
   const sessionRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -636,6 +694,186 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         </div>
       </div>
 
+      {/* Gem-xY custom agent panel */}
+      {(selectedCwdProp || selectedCwd) && (
+        <div style={{ borderBottom: "1px solid var(--border)", flexShrink: 0, paddingBottom: 6 }}>
+          <div
+            onClick={() => setGemsExpanded(!gemsExpanded)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "8px 10px 4px",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.05em",
+              textTransform: "uppercase",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <svg
+                width="9" height="9" viewBox="0 0 10 10" fill="none"
+                stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+                style={{ transform: gemsExpanded ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}
+              >
+                <polyline points="3 2 7 5 3 8" />
+              </svg>
+              <span>智能体 (Gem-xY)</span>
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setEditingGemId(null);
+                setIsGemModalOpen(true);
+              }}
+              title="新建专属智能体"
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--text-dim)",
+                cursor: "pointer",
+                padding: "2px 6px",
+                borderRadius: 4,
+                fontSize: 10,
+                display: "flex",
+                alignItems: "center",
+                gap: 2,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+            >
+              + Create
+            </button>
+          </div>
+
+          {gemsExpanded && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 2,
+                padding: "0 6px",
+                maxHeight: 180,
+                overflowY: "auto",
+              }}
+            >
+              {gems.length === 0 ? (
+                <div style={{ padding: "6px 10px", color: "var(--text-dim)", fontSize: 11, fontStyle: "italic" }}>
+                  暂无智能体，点击 Create 新建
+                </div>
+              ) : (
+                gems.map((gem) => {
+                  const isSelected = activeGemId === gem.id && !selectedSessionId;
+                  return (
+                    <div
+                      key={gem.id}
+                      onClick={() => handleSelectGem(gem.id)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "6px 8px",
+                        borderRadius: 6,
+                        background: isSelected ? "var(--bg-selected)" : "transparent",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        transition: "all 0.12s",
+                      }}
+                      className="gem-sidebar-item"
+                      onMouseEnter={(e) => {
+                        if (!isSelected) e.currentTarget.style.background = "var(--bg-hover)";
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isSelected) e.currentTarget.style.background = "transparent";
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                        <span style={{ fontSize: 14, flexShrink: 0 }}>{gem.avatar || "🤖"}</span>
+                        <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                          <span
+                            style={{
+                              color: isSelected ? "var(--accent)" : "var(--text)",
+                              fontWeight: isSelected ? 600 : 500,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {gem.name}
+                          </span>
+                          {gem.description && (
+                            <span
+                              style={{
+                                fontSize: 10,
+                                color: "var(--text-dim)",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {gem.description}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* Actions */}
+                      <div
+                        className="gem-actions"
+                        style={{
+                          display: "flex",
+                          gap: 4,
+                          flexShrink: 0,
+                          opacity: 0,
+                          transition: "opacity 0.15s",
+                        }}
+                      >
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingGemId(gem.id);
+                            setIsGemModalOpen(true);
+                          }}
+                          title="编辑"
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "var(--text-dim)",
+                            cursor: "pointer",
+                            padding: 2,
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          onClick={(e) => handleDeleteGem(e, gem.id)}
+                          title="删除"
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "var(--text-dim)",
+                            cursor: "pointer",
+                            padding: 2,
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; }}
+                        >
+                          🗑
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Session list */}
       <div style={{ flex: explorerOpen && (selectedCwdProp || selectedCwd) ? "1 1 0" : "1 1 auto", overflowY: "auto", padding: "0", minHeight: 80 }}>
         {loading && (
@@ -756,6 +994,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           )}
         </div>
       )}
+      <style>{`
+        .gem-sidebar-item:hover .gem-actions {
+          opacity: 1 !important;
+        }
+      `}</style>
+      <GemEditorModal
+        isOpen={isGemModalOpen}
+        onClose={() => setIsGemModalOpen(false)}
+        gemId={editingGemId}
+        onSave={() => loadGems()}
+        modelList={modelList}
+      />
     </div>
   );
 }

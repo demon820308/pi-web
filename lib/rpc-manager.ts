@@ -70,9 +70,25 @@ export class AgentSessionWrapper {
 
     switch (type) {
       case "prompt": {
-        // Fire and forget — events come via subscribe
         const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
-        this.inner.prompt(command.message as string, promptImages?.length ? { images: promptImages } : undefined).catch(() => {});
+        
+        // Preflight check: Verify that the current active model has configured authentication
+        // before passing to the underlying session. This prevents native Rust code from
+        // throwing 'invalid type: unit value' during API key resolution when no key is configured.
+        const activeModel = this.inner.model;
+        if (activeModel && !this.inner.modelRegistry.hasConfiguredAuth(activeModel)) {
+          throw new Error(`No API key found for provider "${activeModel.provider}". Please configure it in Models config.`);
+        }
+
+        // Do not silently swallow synchronous preflight errors (like missing API keys).
+        // Awaiting prompt() allows these errors to bubble up so the API router can catch them
+        // and return an HTTP error, preventing the UI from hanging indefinitely on "Waiting for model...".
+        try {
+          await this.inner.prompt(command.message as string, promptImages?.length ? { images: promptImages } : undefined);
+        } catch (err: any) {
+          console.error("Detailed Prompt Error Stack:", err && err.stack ? err.stack : err);
+          throw err;
+        }
         return null;
       }
 
@@ -106,7 +122,23 @@ export class AgentSessionWrapper {
         const registry = this.inner.modelRegistry;
         const model = registry.find(provider, modelId);
         if (!model) throw new Error(`Model not found: ${provider}/${modelId}`);
-        await this.inner.setModel(model);
+        console.log("Model debug - found in registry:", JSON.stringify(model, null, 2));
+
+        const currentModel = this.inner.model;
+        if (currentModel && currentModel.id === model.id && currentModel.provider === model.provider) {
+          console.log("Model debug - already in selected model, skipping setModel call, but ensuring clean assignment");
+          if (this.inner.agent.state) {
+            this.inner.agent.state.model = model;
+          }
+          return { id: model.id, provider: model.provider };
+        }
+
+        // Clean model object: remove all undefined properties using JSON serialization.
+        // This prevents the Rust WASM/Native side from getting 'undefined' values which
+        // it parses as 'unit value', causing 'expected usize' deserialization crashes.
+        const cleanModel = JSON.parse(JSON.stringify(model));
+
+        await this.inner.setModel(cleanModel);
         return { id: model.id, provider: model.provider };
       }
 
@@ -274,7 +306,8 @@ export async function startRpcSession(
   sessionId: string,
   sessionFile: string,
   cwd: string,
-  toolNames?: string[]
+  toolNames?: string[],
+  customSystemPrompt?: string
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
   const registry = getRegistry();
   const locks = getLocks();
@@ -309,6 +342,60 @@ export async function startRpcSession(
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
     });
 
+    // Hijack inner.agent.state.model property to dynamically strip undefined values
+    // while preserving and invoking the original descriptor's getter/setter.
+    // This completely prevents the Rust WASM/Native side from getting 'undefined' properties
+    // which it parses as 'unit value', causing 'expected usize' deserialization crashes.
+    if (inner.agent.state) {
+      let targetObj: any = inner.agent.state;
+      let desc = Object.getOwnPropertyDescriptor(targetObj, "model");
+      while (!desc && targetObj) {
+        targetObj = Object.getPrototypeOf(targetObj);
+        if (targetObj) {
+          desc = Object.getOwnPropertyDescriptor(targetObj, "model");
+        }
+      }
+
+      if (desc) {
+        const originalGet = desc.get;
+        const originalSet = desc.set;
+
+        if (originalGet || originalSet) {
+          Object.defineProperty(inner.agent.state, "model", {
+            get() {
+              const val = originalGet ? originalGet.call(this) : undefined;
+              return val ? JSON.parse(JSON.stringify(val)) : val;
+            },
+            set(newVal) {
+              const cleanVal = newVal ? JSON.parse(JSON.stringify(newVal)) : newVal;
+              if (originalSet) {
+                originalSet.call(this, cleanVal);
+              }
+            },
+            configurable: true,
+            enumerable: true,
+          });
+        } else if (desc.writable) {
+          let currentVal = desc.value;
+          Object.defineProperty(inner.agent.state, "model", {
+            get() {
+              return currentVal ? JSON.parse(JSON.stringify(currentVal)) : currentVal;
+            },
+            set(newVal) {
+              currentVal = newVal ? JSON.parse(JSON.stringify(newVal)) : newVal;
+            },
+            configurable: true,
+            enumerable: true,
+          });
+        }
+      }
+
+      // Force trigger the clean setter once to ensure the initial model in Rust memory is also clean.
+      if (inner.agent.state.model) {
+        inner.agent.state.model = inner.agent.state.model;
+      }
+    }
+
     // If specific tool names were requested (non-empty), narrow active tools now
     if (toolNames && toolNames.length > 0) {
       inner.setActiveToolsByName(toolNames);
@@ -319,6 +406,45 @@ export async function startRpcSession(
     // the only way to truly clear it is to call agent.setSystemPrompt directly.
     if (toolNames?.length === 0) {
       inner.agent.state.systemPrompt = "";
+    }
+
+    if (customSystemPrompt !== undefined) {
+      inner.agent.state.systemPrompt = customSystemPrompt;
+      if (inner.resourceLoader) {
+        inner.resourceLoader.getSystemPrompt = () => customSystemPrompt;
+      }
+      if (typeof (inner as any)._rebuildSystemPrompt === "function") {
+        try {
+          (inner as any)._baseSystemPrompt = (inner as any)._rebuildSystemPrompt(inner.getActiveToolNames());
+          inner.agent.state.systemPrompt = (inner as any)._baseSystemPrompt;
+        } catch (e) {
+          console.error("Failed to rebuild custom system prompt:", e);
+        }
+      }
+    }
+
+    // Wrap inner.agent.streamFn to intercept network error events.
+    // When a connection fails (e.g. timeout or DNS error), the JS fetch stream pushes an "error" event
+    // with no HTTP status code. The underlying Rust WASM deserializer expects a status code (usize)
+    // and throws 'invalid type: unit value, expected usize' causing a fatal crash.
+    // Intercepting and injecting a default status code (500) completely prevents this.
+    if (inner.agent && typeof inner.agent.streamFn === "function") {
+      const originalStreamFn = inner.agent.streamFn;
+      inner.agent.streamFn = function (...args: any[]) {
+        const stream = originalStreamFn.apply(this, args);
+        if (stream && typeof stream.push === "function") {
+          const originalPush = stream.push;
+          stream.push = function (event: any) {
+            if (event && event.type === "error" && event.error) {
+              if (event.error.status === undefined) event.error.status = 500;
+              if (event.error.statusCode === undefined) event.error.statusCode = 500;
+              if (event.error.status_code === undefined) event.error.status_code = 500;
+            }
+            return originalPush.call(this, event);
+          };
+        }
+        return stream;
+      };
     }
 
     const wrapper = new AgentSessionWrapper(inner);

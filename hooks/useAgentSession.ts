@@ -66,6 +66,7 @@ export interface UseAgentSessionOptions {
   onSystemPromptChange?: (prompt: string | null) => void;
   setNewSessionModel?: (model: { provider: string; modelId: string } | null) => void;
   setToolPreset?: (preset: "none" | "default" | "full") => void;
+  activeGemId?: string | null;
 }
 
 export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -212,30 +213,38 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [setToolPresetState]);
 
-  const connectEvents = useCallback((sid: string) => {
+  const connectEvents = useCallback((sid: string): Promise<void> => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
-    const es = new EventSource(`/api/agent/${encodeURIComponent(sid)}/events`);
-    eventSourceRef.current = es;
-    es.onmessage = (e) => {
-      try {
-        const event = JSON.parse(e.data) as AgentEvent;
-        handleAgentEventRef.current?.(event);
-      } catch {
-        // ignore
-      }
-    };
-    es.onerror = () => {
-      if (eventSourceRef.current === es && agentRunningRef.current) {
-        es.close();
-        eventSourceRef.current = null;
-        setTimeout(() => {
-          if (agentRunningRef.current) connectEvents(sid);
-        }, 1000);
-      }
-    };
+    return new Promise<void>((resolve) => {
+      const es = new EventSource(`/api/agent/${encodeURIComponent(sid)}/events`);
+      eventSourceRef.current = es;
+      let resolved = false;
+      const doResolve = () => { if (!resolved) { resolved = true; resolve(); } };
+      es.onopen = () => doResolve();
+      // Fallback: resolve after 200ms even if onopen hasn't fired
+      setTimeout(doResolve, 200);
+      es.onmessage = (e) => {
+        doResolve(); // Also resolve on first message
+        try {
+          const event = JSON.parse(e.data) as AgentEvent;
+          handleAgentEventRef.current?.(event);
+        } catch {
+          // ignore
+        }
+      };
+      es.onerror = () => {
+        if (eventSourceRef.current === es && agentRunningRef.current) {
+          es.close();
+          eventSourceRef.current = null;
+          setTimeout(() => {
+            if (agentRunningRef.current) connectEvents(sid);
+          }, 1000);
+        }
+      };
+    });
   }, []);
 
   useEffect(() => {
@@ -365,13 +374,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             ...(piImages?.length ? { images: piImages } : {}),
             ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
             ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
+            ...(opts.activeGemId ? { gemId: opts.activeGemId } : {}),
           }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const result = await res.json() as { sessionId: string };
         const realId = result.sessionId;
         sessionIdRef.current = realId;
-        connectEvents(realId);
+        // Connect SSE immediately — prompt is already firing server-side (non-blocking)
+        await connectEvents(realId);
         onSessionCreated?.({
           id: realId,
           path: "",
@@ -383,12 +394,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           firstMessage: message,
         });
       } else if (session) {
-        connectEvents(session.id);
-        await sendAgentCommand(session.id, {
+        // Ensure SSE is open before firing prompt so events aren't missed
+        await connectEvents(session.id);
+        sendAgentCommand(session.id, {
           type: "prompt",
           message,
           ...(piImages?.length ? { images: piImages } : {}),
-        });
+        }).catch((e) => console.error("Prompt command error:", e));
       }
     } catch (e) {
       console.error("Failed to send message:", e);
@@ -396,7 +408,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, onSessionCreated]);
+  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, onSessionCreated, opts.activeGemId]);
 
   const handleAbort = useCallback(async () => {
     const sid = sessionIdRef.current;

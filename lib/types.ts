@@ -201,3 +201,18 @@ export interface RpcSessionState {
   sessionName?: string;
   messageCount: number;
 }
+
+export interface GemProfile {
+  id: string;
+  name: string;
+  description: string;
+  avatar: string; // Emoji
+  systemPrompt: string;
+  modelId: string;
+  provider: string;
+  allowedTools: string[];
+  knowledgeFiles: string[];
+  created: string;
+  modified: string;
+}
+
