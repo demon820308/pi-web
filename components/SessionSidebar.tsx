@@ -100,9 +100,14 @@ function buildSessionTree(sessions: SessionInfo[]): SessionTreeNode[] {
     }
   }
 
-  // Sort each level by modified desc
+  // Sort each level by locked desc first, then by modified desc
   const sort = (nodes: SessionTreeNode[]) => {
-    nodes.sort((a, b) => b.session.modified.localeCompare(a.session.modified));
+    nodes.sort((a, b) => {
+      const lockA = a.session.locked ? 1 : 0;
+      const lockB = b.session.locked ? 1 : 0;
+      if (lockA !== lockB) return lockB - lockA;
+      return b.session.modified.localeCompare(a.session.modified);
+    });
     nodes.forEach((n) => sort(n.children));
   };
   sort(roots);
