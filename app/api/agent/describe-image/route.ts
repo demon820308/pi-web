@@ -291,8 +291,31 @@ export async function POST(req: Request) {
         throw new Error(`${provider.toUpperCase()} API returned status ${response.status}: ${JSON.stringify(errorData)}`);
       }
 
-      const data = await response.json() as { choices?: { message?: { content?: string } }[] };
-      const description = data.choices?.[0]?.message?.content?.trim() || "";
+      const data = await response.json() as {
+        choices?: {
+          message?: {
+            content?: string;
+            reasoning_content?: string;
+            thinking_content?: string;
+            thinking?: string;
+          }
+        }[]
+      };
+
+      const message = data.choices?.[0]?.message;
+      let description = message?.content?.trim() || "";
+
+      // Fallback for reasoning models (like MiMo-V2.5, DeepSeek-R1) which put descriptions inside reasoning/thinking fields
+      if (!description && message) {
+        if (message.reasoning_content?.trim()) {
+          description = message.reasoning_content.trim();
+        } else if (message.thinking_content?.trim()) {
+          description = message.thinking_content.trim();
+        } else if (message.thinking?.trim()) {
+          description = message.thinking.trim();
+        }
+      }
+
       return NextResponse.json({ description });
     }
   } catch (error) {
