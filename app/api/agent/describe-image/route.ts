@@ -16,7 +16,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "image and mimeType are required" }, { status: 400 });
     }
 
-    // 1. Sanitize image base64 data to prevent double-prefix and whitespace issues
+    // 1. Sanitize image base64 data — strip any data URL prefix and whitespace
     let base64Data = image.trim();
     if (base64Data.startsWith("data:")) {
       const commaIndex = base64Data.indexOf(",");
@@ -26,14 +26,46 @@ export async function POST(req: Request) {
     }
     base64Data = base64Data.replace(/\s/g, "");
 
-    // 2. Normalize mimeType
-    let normalizedMimeType = mimeType.toLowerCase().trim();
-    if (normalizedMimeType.includes(";")) {
-      normalizedMimeType = normalizedMimeType.split(";")[0];
+    // 2. Decode base64 → raw bytes, then re-encode to get perfectly clean base64.
+    //    This eliminates any corruption or encoding artifacts from the client side.
+    let imageBuffer: Buffer;
+    try {
+      imageBuffer = Buffer.from(base64Data, "base64");
+      if (imageBuffer.length === 0) {
+        return NextResponse.json({ error: "Image data decoded to empty buffer — the base64 payload may be corrupt." }, { status: 400 });
+      }
+      // Re-encode from the decoded buffer for guaranteed clean base64
+      base64Data = imageBuffer.toString("base64");
+    } catch {
+      return NextResponse.json({ error: "Failed to decode base64 image data." }, { status: 400 });
     }
-    if (normalizedMimeType === "image/jpg") {
+
+    // 3. Detect true image format from magic bytes (overrides browser-supplied MIME type).
+    //    Some files have a mismatched extension/MIME type that confuses vision APIs.
+    const SUPPORTED_MIME_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"] as const;
+    let normalizedMimeType: string = mimeType.toLowerCase().trim().split(";")[0].trim();
+    if (normalizedMimeType === "image/jpg") normalizedMimeType = "image/jpeg";
+
+    const b = imageBuffer;
+    if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) {
+      normalizedMimeType = "image/jpeg";
+    } else if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) {
+      normalizedMimeType = "image/png";
+    } else if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) {
+      normalizedMimeType = "image/gif";
+    } else if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+               b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) {
+      normalizedMimeType = "image/webp";
+    } else if (b[0] === 0x42 && b[1] === 0x4D) {
+      normalizedMimeType = "image/bmp";
+    } else if (!SUPPORTED_MIME_TYPES.includes(normalizedMimeType as typeof SUPPORTED_MIME_TYPES[number])) {
+      // Unknown magic bytes and unsupported MIME type — default to JPEG as last resort
+      console.warn(`[describe-image] Unknown image magic bytes 0x${b[0]?.toString(16)} 0x${b[1]?.toString(16)} 0x${b[2]?.toString(16)} and unsupported mimeType "${normalizedMimeType}", defaulting to image/jpeg`);
       normalizedMimeType = "image/jpeg";
     }
+
+    // 4. Debug logging
+    console.log(`[describe-image] buffer=${imageBuffer.length}B, detectedMime=${normalizedMimeType}, first4=0x${b[0]?.toString(16)}${b[1]?.toString(16)}${b[2]?.toString(16)}${b[3]?.toString(16)}, base64Len=${base64Data.length}`);
 
     const authStorage = AuthStorage.create();
     const registry = ModelRegistry.create(authStorage);
@@ -224,27 +256,34 @@ export async function POST(req: Request) {
       const description = data.content?.[0]?.text?.trim() || "";
       return NextResponse.json({ description });
     } else {
+      const imageUrl = `data:${normalizedMimeType};base64,${base64Data}`;
+      const requestBody = {
+        model: modelId,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: promptText },
+              {
+                type: "image_url",
+                image_url: {
+                  url: imageUrl,
+                },
+              },
+            ],
+          },
+        ],
+        max_tokens: 300,
+      };
+      console.log(`[describe-image] Sending to: ${endpoint}`);
+      console.log(`[describe-image] model: ${modelId}, provider: ${provider}`);
+      console.log(`[describe-image] imageUrl prefix: ${imageUrl.substring(0, 60)}...`);
+      console.log(`[describe-image] headers (keys): ${Object.keys(headers).join(", ")}`);
+
       const response = await fetch(endpoint, {
         method: "POST",
         headers,
-        body: JSON.stringify({
-          model: modelId,
-          messages: [
-            {
-              role: "user",
-              content: [
-                { type: "text", text: promptText },
-                {
-                  type: "image_url",
-                  image_url: {
-                    url: `data:${normalizedMimeType};base64,${base64Data}`,
-                  },
-                },
-              ],
-            },
-          ],
-          max_tokens: 300,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
