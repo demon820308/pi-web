@@ -119,6 +119,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const agentRunningRef = useRef(false);
+  const sendingRef = useRef(false);
   const handleAgentEventRef = useRef<((event: AgentEvent) => void) | null>(null);
   const initialScrollDoneRef = useRef(false);
   const lastUserMsgRef = useRef<HTMLDivElement | null>(null);
@@ -260,6 +261,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         break;
       case "agent_end":
         setAgentRunning(false);
+        sendingRef.current = false;
         setAgentPhase(null);
         setRetryInfo(null);
         dispatch({ type: "end" });
@@ -286,7 +288,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       case "message_end": {
         const completed = event.message as AgentMessage | undefined;
-        if (completed) {
+        if (completed && completed.role !== "user") {
           setMessages((prev) => [...prev, normalizeToolCalls(completed)]);
         }
         dispatch({ type: "reset" });
@@ -339,7 +341,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
     if (!message.trim() && !images?.length) return;
-    if (agentRunning) return;
+    if (agentRunning || sendingRef.current) return;
+    sendingRef.current = true;
 
     const imageBlocks = images?.map((img) => ({ type: "image" as const, source: { type: "base64" as const, media_type: img.mimeType, data: img.data } }));
     const userMsg: AgentMessage = {
@@ -400,13 +403,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           type: "prompt",
           message,
           ...(piImages?.length ? { images: piImages } : {}),
-        }).catch((e) => console.error("Prompt command error:", e));
+        }).catch((e) => {
+          console.error("Prompt command error:", e);
+          sendingRef.current = false;
+        });
       }
     } catch (e) {
       console.error("Failed to send message:", e);
       setAgentRunning(false);
       setAgentPhase(null);
       dispatch({ type: "end" });
+      sendingRef.current = false;
     }
   }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, onSessionCreated, opts.activeGemId]);
 
