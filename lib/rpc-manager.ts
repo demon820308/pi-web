@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import { cacheSessionPath } from "./session-reader";
 import type { AgentSessionLike, ToolInfo } from "./pi-types";
@@ -76,7 +77,7 @@ export class AgentSessionWrapper {
         // before passing to the underlying session. This prevents native Rust code from
         // throwing 'invalid type: unit value' during API key resolution when no key is configured.
         const activeModel = this.inner.model;
-        if (activeModel && !this.inner.modelRegistry.hasConfiguredAuth(activeModel)) {
+        if (activeModel && !(this.inner.modelRegistry as any).hasConfiguredAuth(activeModel as any)) {
           throw new Error(`No API key found for provider "${activeModel.provider}". Please configure it in Models config.`);
         }
 
@@ -128,7 +129,7 @@ export class AgentSessionWrapper {
         if (currentModel && currentModel.id === model.id && currentModel.provider === model.provider) {
           console.log("Model debug - already in selected model, skipping setModel call, but ensuring clean assignment");
           if (this.inner.agent.state) {
-            this.inner.agent.state.model = model;
+            (this.inner.agent.state as any).model = model;
           }
           return { id: model.id, provider: model.provider };
         }
@@ -428,13 +429,13 @@ export async function startRpcSession(
     // with no HTTP status code. The underlying Rust WASM deserializer expects a status code (usize)
     // and throws 'invalid type: unit value, expected usize' causing a fatal crash.
     // Intercepting and injecting a default status code (500) completely prevents this.
-    if (inner.agent && typeof inner.agent.streamFn === "function") {
-      const originalStreamFn = inner.agent.streamFn;
-      inner.agent.streamFn = function (...args: any[]) {
+    if (inner.agent && typeof (inner.agent as any).streamFn === "function") {
+      const originalStreamFn = (inner.agent as any).streamFn;
+      (inner.agent as any).streamFn = function (...args: any[]) {
         const stream = originalStreamFn.apply(this, args);
-        if (stream && typeof stream.push === "function") {
-          const originalPush = stream.push;
-          stream.push = function (event: any) {
+        if (stream && typeof (stream as any).push === "function") {
+          const originalPush = (stream as any).push;
+          (stream as any).push = function (event: any) {
             if (event && event.type === "error" && event.error) {
               if (event.error.status === undefined) event.error.status = 500;
               if (event.error.statusCode === undefined) event.error.statusCode = 500;

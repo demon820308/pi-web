@@ -259,7 +259,7 @@ slide6.addText("Getting Started", {
 });
 
 const steps = [
-  { step: "1", title: "Install", cmd: "npm install -g @demon/pi-agent-xy" },
+  { step: "1", title: "Install", cmd: "npm install -g @zwbigi/pi-agent-xy" },
   { step: "2", title: "Configure", cmd: "Edit ~/.pi/agent/models.json" },
   { step: "3", title: "Run", cmd: "pi-agent-xy start" },
   { step: "4", title: "Open", cmd: "http://localhost:30142" }
@@ -319,7 +319,7 @@ slide7.addText("Start building with Pi Agent xY today", {
 // Contact info
 slide7.addText([
   { text: "GitHub: github.com/demon820308/pi-web", options: { breakLine: true } },
-  { text: "npm: @demon/pi-agent-xy", options: {} }
+  { text: "npm: @zwbigi/pi-agent-xy", options: {} }
 ], {
   x: 0.5, y: 3.8, w: 9, h: 1,
   fontSize: 16, fontFace: "Arial",

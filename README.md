@@ -7,13 +7,13 @@
 **无需安装，直接运行：**
 
 ```bash
-npx @demon/pi-agent-xy@latest
+npx @zwbigi/pi-agent-xy@latest
 ```
 
 **或全局安装后使用：**
 
 ```bash
-npm install -g @demon/pi-agent-xy
+npm install -g @zwbigi/pi-agent-xy
 pi-agent-xy
 ```
 
