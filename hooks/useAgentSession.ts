@@ -346,13 +346,16 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const dynamicModel = modelList?.find(m => m.id === currentModel?.modelId && m.provider === currentModel?.provider);
     const supportsVision = dynamicModel ? !!(dynamicModel as any).supportsVision : false;
 
-    // Vision model: pass image directly — no intermediate conversion needed.
-    // The image is already sent as an image content block by the caller.
-    if (supportsVision) return message;
+    // Vision model: pass image directly as content block — no intermediate conversion.
+    // If the user sent only an image with no text, supply a neutral default prompt
+    // so the agent receives a non-empty message string.
+    if (supportsVision) {
+      return message.trim() || "请分析这张图片。";
+    }
 
     // Non-vision model fallback: get a concise plain-text description so the
-    // agent has some context about the image, but without any prompt-engineering
-    // wrappers that would pollute the conversation history.
+    // agent has some context about the image, without prompt-engineering wrappers
+    // that would pollute the conversation history.
     try {
       const descriptions = await Promise.all(
         images.map(async (img) => {
@@ -380,7 +383,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } catch (e) {
       console.error("Failed to describe images for non-vision model:", e);
     }
-    return message;
+    // Last resort: return user message or a default so the agent gets something
+    return message.trim() || "请分析这张图片。";
   }, [modelList, currentModel]);
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
