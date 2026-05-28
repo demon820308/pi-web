@@ -424,7 +424,7 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
     const supportsVision = (dynamicModel && dynamicModel.supportsVision) || (model ? isVisionModel(model.provider, model.modelId) : false);
 
     if (!supportsVision) {
-      setDescribeError("当前模型不支持，请切换模型。");
+      setDescribeError("该模型不是视觉模型，不支持识图功能。");
       return;
     }
 
@@ -454,7 +454,16 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
 
     } catch (err: any) {
       console.error(err);
-      setDescribeError(err.message || String(err));
+      let errMsg = err.message || String(err);
+      if (
+        errMsg.includes("No endpoints found that support image input") ||
+        errMsg.includes("support image input") ||
+        errMsg.includes("not support image") ||
+        (errMsg.includes("404") && (errMsg.toLowerCase().includes("image") || errMsg.toLowerCase().includes("endpoint")))
+      ) {
+        errMsg = "该模型不是视觉模型，不支持识图功能。";
+      }
+      setDescribeError(errMsg);
     } finally {
       setDescribingIndices((prev) => ({ ...prev, [index]: false }));
     }
