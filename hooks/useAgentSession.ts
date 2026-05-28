@@ -343,10 +343,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const getProcessedMessage = useCallback(async (message: string, images?: AttachedImage[]) => {
     if (!images || images.length === 0) return message;
 
-    // Check if current model natively supports vision
-    const dynamicModel = modelList?.find(m => m.id === currentModel?.modelId && m.provider === currentModel?.provider);
+    // Check if currently selected/displayed model natively supports vision
+    const dynamicModel = modelList?.find(m => m.id === displayModel?.modelId && m.provider === displayModel?.provider);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supportsVision = (dynamicModel && !!(dynamicModel as any).supportsVision) || (currentModel ? isVisionModel(currentModel.provider, currentModel.modelId) : false);
+    const supportsVision = (dynamicModel && !!(dynamicModel as any).supportsVision) || (displayModel ? isVisionModel(displayModel.provider, displayModel.modelId) : false);
 
     // Vision model: pass image directly as content block — no intermediate conversion.
     // If the user sent only an image with no text, supply a neutral default prompt
@@ -387,7 +387,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
     // Last resort: return user message or a default so the agent gets something
     return message.trim() || "请分析这张图片。";
-  }, [modelList, currentModel]);
+  }, [modelList, displayModel]);
 
   const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
     if (!message.trim() && !images?.length) return;
