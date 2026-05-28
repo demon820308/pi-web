@@ -126,67 +126,171 @@ function parseDescriptionToJSON(text: string): string {
   let background = "";
   let lighting = "";
   let style = "";
+  let prompt = "";
 
-  // Clean Markdown notations
-  const cleanText = text.replace(/[\*\#\>\-\`]/g, " ").replace(/\s+/g, " ").trim();
+  // Split by line to perform structured extraction
+  const lines = text.split(/\r?\n/);
+  let inFinalPromptSection = false;
+  let finalPromptLines: string[] = [];
 
-  // Extract core_subject
-  const subjectMatch = cleanText.match(/(?:主角是|主体是|画面中是|一个|一位|一幅|主角为|主体为|核心焦点为|核心为)([^，。；]+)/i);
-  coreSubject = subjectMatch ? subjectMatch[1].trim() : "";
+  for (let line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
 
-  // Extract clothing
-  const clothingMatch = cleanText.match(/(?:身穿|身着|穿着|身披|着装为|服装为|衣服为|衣服是|身穿一袭)([^，。；]+)/i);
-  clothing = clothingMatch ? clothingMatch[1].trim() : "";
+    // Check if we hit the final prompt section header
+    if (trimmed.includes("最终直调用") || trimmed.includes("【最终直调用 Prompt】")) {
+      inFinalPromptSection = true;
+      continue;
+    }
 
-  // Extract location
-  const locationMatch = cleanText.match(/(?:在|位于|置身于|场景是|地点是|背景是|场景为|位置为|居中放置)([^，。；]{2,20})(?:中|里|上|下|旁|前|后|，|。|；)/i);
-  location = locationMatch ? locationMatch[1].trim() : "";
+    if (inFinalPromptSection) {
+      if (trimmed === "---" || trimmed.startsWith("---") || trimmed.startsWith("***")) continue;
+      finalPromptLines.push(trimmed);
+      continue;
+    }
 
-  // Extract background
-  const backgroundMatch = cleanText.match(/(?:背景是|背景为|背景中包含|背景有|配景为|背景采用)([^。；，]+)/i);
-  background = backgroundMatch ? backgroundMatch[1].trim() : "";
-
-  // Extract lighting
-  const lightingMatch = cleanText.match(/(?:光线|光影|阳光|照射|照明|光效|光环|散发出)([^，。；]+)/i);
-  lighting = lightingMatch ? lightingMatch[1].trim() : "";
-
-  // Extract style
-  const styleMatch = cleanText.match(/(?:风格|画风|设计风格|视觉风格|呈现出|表现为|采用)([^，。；]+)/i);
-  style = styleMatch ? styleMatch[1].trim() : "";
-
-  // Fallbacks using sentence segments
-  const sentences = cleanText.split(/[，。；]/).map(s => s.trim()).filter(Boolean);
-  if (!coreSubject && sentences.length > 0) coreSubject = sentences[0];
-  if (!location && sentences.length > 1) location = sentences[1];
-  
-  if (!style) {
-    if (cleanText.includes("摄影")) style = "写实摄影肖像";
-    else if (cleanText.includes("插画")) style = "动漫手绘插画";
-    else if (cleanText.includes("界面") || cleanText.includes("设计")) style = "UI界面设计";
-    else style = "现代艺术风格";
+    const lower = trimmed.toLowerCase();
+    
+    // Core Subject
+    if (lower.includes("core_subject") || trimmed.includes("核心主体")) {
+      const parts = trimmed.split(/[:：]/);
+      if (parts.length > 1) {
+        coreSubject = parts.slice(1).join(":").trim();
+      }
+    }
+    // Clothing
+    else if (lower.includes("clothing") || trimmed.includes("服装/材质") || trimmed.includes("服装") || trimmed.includes("材质")) {
+      if (!lower.includes("lighting") && !trimmed.includes("光照")) {
+        const parts = trimmed.split(/[:：]/);
+        if (parts.length > 1) {
+          clothing = parts.slice(1).join(":").trim();
+        }
+      }
+    }
+    // Location
+    else if (lower.includes("location") || trimmed.includes("具体地点")) {
+      const parts = trimmed.split(/[:：]/);
+      if (parts.length > 1) {
+        location = parts.slice(1).join(":").trim();
+      }
+    }
+    // Background
+    else if (lower.includes("background") || trimmed.includes("画面背景")) {
+      const parts = trimmed.split(/[:::：]/);
+      if (parts.length > 1) {
+        background = parts.slice(1).join(":").trim();
+      }
+    }
+    // Lighting
+    else if (lower.includes("lighting") || trimmed.includes("光照与色彩") || trimmed.includes("光照") || trimmed.includes("色彩")) {
+      const parts = trimmed.split(/[:：]/);
+      if (parts.length > 1) {
+        lighting = parts.slice(1).join(":").trim();
+      }
+    }
+    // Style
+    else if (lower.includes("style") || trimmed.includes("艺术风格")) {
+      const parts = trimmed.split(/[:：]/);
+      if (parts.length > 1) {
+        style = parts.slice(1).join(":").trim();
+      }
+    }
   }
 
-  // Fallback defaults to ensure neatness - removed all arbitrary added text.
-  // We keep them strictly empty if not found in the original vision response.
-  if (!clothing) clothing = "";
-  if (!location) location = "";
-  if (!background) background = "";
-  if (!lighting) lighting = "";
-  if (!style) style = "";
+  // Clean values from markdown formatting
+  const cleanMarkdown = (val: string) => {
+    return val.replace(/[\*\#\>\`]/g, "").trim();
+  };
 
-  // Synthesize a structured image prompt using strictly the available elements without any extra text addition
-  const promptParts = [
-    style ? style : "",
-    coreSubject ? coreSubject : "",
-    location ? location : "",
-    clothing ? clothing : "",
-    background ? background : "",
-    lighting ? lighting : ""
-  ].filter(Boolean);
+  coreSubject = cleanMarkdown(coreSubject);
+  clothing = cleanMarkdown(clothing);
+  location = cleanMarkdown(location);
+  background = cleanMarkdown(background);
+  lighting = cleanMarkdown(lighting);
+  style = cleanMarkdown(style);
 
-  let synthesizedPrompt = promptParts.join("，");
-  if (!synthesizedPrompt) {
-    synthesizedPrompt = cleanText;
+  // Parse prompt text from final prompt section
+  let finalPromptText = finalPromptLines.join("\n").trim();
+  
+  // Clean instructions if the model repeated them
+  const instructionRegexes = [
+    /请根据上述分析，直接组合出可直接复制的流利中文\s*Prompt。/ig,
+    /请使用纯英文自然语言或短语（用逗号隔开），以便我直接复制粘贴：/ig,
+    /请使用纯英文自然语言或短语\s*\(用逗号隔开\)\s*，以便我直接复制粘贴：/ig,
+    /请使用纯英文自然语言或短语\s*（用逗号隔开）\s*，以便我直接复制粘贴：/ig,
+    /请根据上述分析，直接组合出可直接复制的流利中文\s*Prompt/ig,
+    /请使用纯英文自然语言或短语/ig,
+    /以便我直接复制粘贴/ig,
+  ];
+
+  for (const regex of instructionRegexes) {
+    finalPromptText = finalPromptText.replace(regex, "");
+  }
+  // Trim any leading/trailing colons or extra characters left over
+  finalPromptText = finalPromptText.replace(/^[:：\s]+/, "").trim();
+  finalPromptText = cleanMarkdown(finalPromptText);
+
+  // Fallback to heuristic regexes if some fields are missing
+  if (!coreSubject || !style) {
+    const cleanText = text.replace(/[\*\#\>\-\`]/g, " ").replace(/\s+/g, " ").trim();
+
+    if (!coreSubject) {
+      const subjectMatch = cleanText.match(/(?:主角是|主体是|画面中是|一个|一位|一幅|主角为|主体为|核心焦点为|核心为)([^，。；]+)/i);
+      coreSubject = subjectMatch ? subjectMatch[1].trim() : "";
+    }
+
+    if (!clothing) {
+      const clothingMatch = cleanText.match(/(?:身穿|身着|穿着|身披|着装为|服装为|衣服为|衣服是|身穿一袭)([^，。；]+)/i);
+      clothing = clothingMatch ? clothingMatch[1].trim() : "";
+    }
+
+    if (!location) {
+      const locationMatch = cleanText.match(/(?:在|位于|置身于|场景是|地点是|背景是|场景为|位置为|居中放置)([^，。；]{2,20})(?:中|里|上|下|旁|前|后|，|。|；)/i);
+      location = locationMatch ? locationMatch[1].trim() : "";
+    }
+
+    if (!background) {
+      const backgroundMatch = cleanText.match(/(?:背景是|背景为|背景中包含|背景有|配景为|背景采用)([^。；，]+)/i);
+      background = backgroundMatch ? backgroundMatch[1].trim() : "";
+    }
+
+    if (!lighting) {
+      const lightingMatch = cleanText.match(/(?:光线|光影|阳光|照射|照明|光效|光环|散发出)([^，。；]+)/i);
+      lighting = lightingMatch ? lightingMatch[1].trim() : "";
+    }
+
+    if (!style) {
+      const styleMatch = cleanText.match(/(?:风格|画风|设计风格|视觉风格|呈现出|表现为|采用)([^，。；]+)/i);
+      style = styleMatch ? styleMatch[1].trim() : "";
+    }
+
+    const sentences = cleanText.split(/[，。；]/).map(s => s.trim()).filter(Boolean);
+    if (!coreSubject && sentences.length > 0) coreSubject = sentences[0];
+    if (!location && sentences.length > 1) location = sentences[1];
+    
+    if (!style) {
+      if (cleanText.includes("摄影")) style = "写实摄影肖像";
+      else if (cleanText.includes("插画")) style = "动漫手绘插画";
+      else if (cleanText.includes("界面") || cleanText.includes("设计")) style = "UI界面设计";
+      else style = "现代艺术风格";
+    }
+  }
+
+  // Synthesize a structured prompt if no explicit prompt section was captured
+  if (!finalPromptText) {
+    const promptParts = [
+      style ? style : "",
+      coreSubject ? coreSubject : "",
+      location ? location : "",
+      clothing ? clothing : "",
+      background ? background : "",
+      lighting ? lighting : ""
+    ].filter(Boolean);
+
+    finalPromptText = promptParts.join("，");
+    if (!finalPromptText) {
+      finalPromptText = text.replace(/[\*\#\>\-\`]/g, " ").replace(/\s+/g, " ").trim();
+    }
   }
 
   const jsonObj = {
@@ -197,7 +301,7 @@ function parseDescriptionToJSON(text: string): string {
       background: background,
       lighting: lighting,
       style: style,
-      prompt: synthesizedPrompt
+      prompt: finalPromptText
     }
   };
 
