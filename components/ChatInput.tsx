@@ -473,17 +473,37 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
     const msg = value.trim();
     if (!msg && !attachedImages.length) return;
     if (isStreaming) return;
+
+    if (attachedImages.length > 0) {
+      const dynamicModel = modelList?.find(m => m.id === model?.modelId && m.provider === model?.provider);
+      const supportsVision = (dynamicModel && dynamicModel.supportsVision) || (model ? isVisionModel(model.provider, model.modelId) : false);
+      if (!supportsVision) {
+        setDescribeError("该模型不是视觉模型，不支持识图功能。");
+        return;
+      }
+    }
+
     onSend(msg, attachedImages.length ? attachedImages : undefined);
     setValue("");
     clearImages();
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [value, attachedImages, isStreaming, onSend, clearImages]);
+  }, [value, attachedImages, isStreaming, onSend, clearImages, model, modelList]);
 
   const sendQueued = useCallback((mode: "steer" | "followup") => {
     const msg = value.trim();
     if (!msg && !attachedImages.length) return;
+
+    if (attachedImages.length > 0) {
+      const dynamicModel = modelList?.find(m => m.id === model?.modelId && m.provider === model?.provider);
+      const supportsVision = (dynamicModel && dynamicModel.supportsVision) || (model ? isVisionModel(model.provider, model.modelId) : false);
+      if (!supportsVision) {
+        setDescribeError("该模型不是视觉模型，不支持识图功能。");
+        return;
+      }
+    }
+
     if (mode === "steer" && onSteer) {
       onSteer(msg, attachedImages.length ? attachedImages : undefined);
     } else if (mode === "followup" && onFollowUp) {
@@ -492,7 +512,7 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
     setValue("");
     clearImages();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, attachedImages, onSteer, onFollowUp, clearImages]);
+  }, [value, attachedImages, onSteer, onFollowUp, clearImages, model, modelList]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
