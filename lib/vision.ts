@@ -6,6 +6,11 @@ export function isVisionModel(provider: string, modelId: string): boolean {
     return false;
   }
 
+  // If it's a mimo-v2-flash or a text-only flash model, it doesn't support vision on the completions API
+  if (mid.includes("mimo") && mid.includes("flash")) {
+    return false;
+  }
+
   // If it's explicitly deepseek, it doesn't support vision (except for deepseek-vl, deepseek-vl2, deepseek-v4, janus, deepseek-ocr)
   if (pid.includes("deepseek") || mid.includes("deepseek")) {
     if (

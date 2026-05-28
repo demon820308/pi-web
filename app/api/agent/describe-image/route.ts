@@ -278,6 +278,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ description });
     } else {
       const imageUrl = `data:${normalizedMimeType};base64,${base64Data}`;
+      if (modelId && modelId.toLowerCase().includes("mimo") && modelId.toLowerCase().includes("flash")) {
+        modelId = "mimo-v2-omni";
+      }
       const requestBody = {
         model: modelId,
         messages: [
