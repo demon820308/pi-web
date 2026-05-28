@@ -341,10 +341,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const getProcessedMessage = useCallback(async (message: string, images?: AttachedImage[]) => {
     if (!images || images.length === 0) return message;
-    try {
-      const dynamicModel = modelList?.find(m => m.id === currentModel?.modelId && m.provider === currentModel?.provider);
-      const supportsVision = dynamicModel ? !!(dynamicModel as any).supportsVision : false;
 
+    // Check if current model natively supports vision
+    const dynamicModel = modelList?.find(m => m.id === currentModel?.modelId && m.provider === currentModel?.provider);
+    const supportsVision = dynamicModel ? !!(dynamicModel as any).supportsVision : false;
+
+    // Vision model: pass image directly — no intermediate conversion needed.
+    // The image is already sent as an image content block by the caller.
+    if (supportsVision) return message;
+
+    // Non-vision model fallback: get a concise plain-text description so the
+    // agent has some context about the image, but without any prompt-engineering
+    // wrappers that would pollute the conversation history.
+    try {
       const descriptions = await Promise.all(
         images.map(async (img) => {
           const res = await fetch("/api/agent/describe-image", {
@@ -353,13 +362,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             body: JSON.stringify({
               image: img.data,
               mimeType: img.mimeType,
-              ...(supportsVision && currentModel ? {
-                provider: currentModel.provider,
-                modelId: currentModel.modelId,
-              } : {}),
+              // No provider/modelId — let the backend pick a capable vision model
             }),
           });
-          if (!res.ok) throw new Error("Failed to auto-describe image");
+          if (!res.ok) throw new Error("Failed to describe image");
           const data = await res.json();
           return data.description;
         })
@@ -367,16 +373,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
       const joinedDescriptions = descriptions.filter(Boolean).join("\n\n");
       if (joinedDescriptions) {
-        return `[图片分析提示词]：
-${joinedDescriptions}
-
----
-请在回复的开头以“**图片反推提示词：**”的形式完整输出上述提示词，然后再开始您的任务分析与代码编写。
-
-${message.trim() ? `用户原始输入：\n${message.trim()}` : ""}`;
+        // Minimal, clean prefix — no instruction wrappers
+        const imgPrefix = `[图片描述]：\n${joinedDescriptions}`;
+        return message.trim() ? `${imgPrefix}\n\n${message.trim()}` : imgPrefix;
       }
     } catch (e) {
-      console.error("Failed to automatically describe images on send:", e);
+      console.error("Failed to describe images for non-vision model:", e);
     }
     return message;
   }, [modelList, currentModel]);

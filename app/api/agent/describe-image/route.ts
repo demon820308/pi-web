@@ -319,14 +319,37 @@ export async function POST(req: Request) {
       const message = data.choices?.[0]?.message;
       let description = message?.content?.trim() || "";
 
-      // Fallback for reasoning models (like MiMo-V2.5, DeepSeek-R1) which put descriptions inside reasoning/thinking fields
+      // Fallback for reasoning models (e.g. MiMo-V2.5, DeepSeek-R1) which place
+      // their output inside reasoning/thinking fields when content is empty.
+      // We only extract the LAST non-empty paragraph as the conclusion — the
+      // earlier paragraphs are internal thinking/deliberation that should not
+      // be returned as the description.
       if (!description && message) {
-        if (message.reasoning_content?.trim()) {
-          description = message.reasoning_content.trim();
-        } else if (message.thinking_content?.trim()) {
-          description = message.thinking_content.trim();
-        } else if (message.thinking?.trim()) {
-          description = message.thinking.trim();
+        const reasoning = (
+          message.reasoning_content?.trim() ||
+          message.thinking_content?.trim() ||
+          message.thinking?.trim() ||
+          ""
+        );
+        if (reasoning) {
+          // Split into paragraphs, pick the last substantive one
+          const paragraphs = reasoning
+            .split(/\n\n+/)
+            .map((p: string) => p.trim())
+            .filter(Boolean);
+          // Walk backwards to find the first paragraph that looks like a
+          // conclusion (long enough and doesn't start with uncertainty markers)
+          const uncertaintyMarkers = ["不对", "等等", "可能", "但是我", "然而我", "让我", "先得", "首先得", "再想"];
+          for (let i = paragraphs.length - 1; i >= 0; i--) {
+            const para = paragraphs[i];
+            const startsWithUncertainty = uncertaintyMarkers.some(m => para.startsWith(m));
+            if (para.length >= 40 && !startsWithUncertainty) {
+              description = para;
+              break;
+            }
+          }
+          // Last resort: use the whole reasoning text
+          if (!description) description = reasoning;
         }
       }
 
