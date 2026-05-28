@@ -2,9 +2,14 @@ export function isVisionModel(provider: string, modelId: string): boolean {
   const pid = provider.toLowerCase();
   const mid = modelId.toLowerCase();
 
-  // If it's explicitly deepseek, it doesn't support vision (except for deepseek-vl / deepseek-vl2 series)
+  // If it's explicitly deepseek, it doesn't support vision (except for deepseek-vl, deepseek-vl2, deepseek-v4, janus, deepseek-ocr)
   if (pid.includes("deepseek") || mid.includes("deepseek")) {
-    if (mid.includes("deepseek-vl") || mid.includes("deepseek-vl2")) {
+    if (
+      mid.includes("vl") ||
+      mid.includes("v4") ||
+      mid.includes("janus") ||
+      mid.includes("ocr")
+    ) {
       return true;
     }
     return false;
@@ -80,8 +85,8 @@ export function isVisionModel(provider: string, modelId: string): boolean {
     (mid.includes("llama") && (mid.includes("11b") || mid.includes("90b") || mid.includes("vision") || mid.includes("multimodal"))) ||
     // Qwen VL models
     (mid.includes("qwen") && mid.includes("vl")) ||
-    // Zhipu GLM Vision models
-    (mid.includes("glm") && (mid.includes("4v") || mid.includes("5v") || mid.includes("thinking"))) ||
+    // Zhipu GLM Vision models (using robust regex for glm-4v, glm-4.5v, glm-edge-v, etc.)
+    (mid.includes("glm") && (mid.includes("vision") || mid.includes("vl") || mid.includes("thinking") || /glm-(?:\d+(?:\.\d+)?v|edge-v|omni)/i.test(mid))) ||
     mid.includes("cogvlm") ||
     mid.includes("internvl") ||
     // Yi VL models
@@ -92,8 +97,12 @@ export function isVisionModel(provider: string, modelId: string): boolean {
     (mid.includes("hunyuan") && (mid.includes("vision") || mid.includes("vl"))) ||
     // ByteDance Doubao Vision models
     (mid.includes("doubao") && (mid.includes("vision") || mid.includes("vl"))) ||
+    // Kimi / Moonshot models (matching Kimi K2.6, kimi-2.6, etc.)
+    ((mid.includes("kimi") || mid.includes("moonshot")) && (mid.includes("vision") || mid.includes("vl") || mid.includes("2.6") || mid.includes("k2"))) ||
     // MiniMax Vision models
-    (mid.includes("abab") && (mid.includes("vision") || mid.includes("vl")))
+    (mid.includes("abab") && (mid.includes("vision") || mid.includes("vl"))) ||
+    (mid.includes("minimax") && (mid.includes("vision") || mid.includes("vl"))) ||
+    mid.includes("hailuo")
   ) {
     return true;
   }
