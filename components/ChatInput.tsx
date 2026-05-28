@@ -68,14 +68,12 @@ function parseDescriptionToJSON(text: string): string {
   let background = "";
   let lighting = "";
   let style = "";
-  let prompt = "";
-
   // Split by line to perform structured extraction
   const lines = text.split(/\r?\n/);
   let inFinalPromptSection = false;
-  let finalPromptLines: string[] = [];
+  const finalPromptLines: string[] = [];
 
-  for (let line of lines) {
+  for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
@@ -452,6 +450,7 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
       setCopySuccess(false);
       setPromptTab("text");
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       console.error(err);
       let errMsg = err.message || String(err);
@@ -467,7 +466,7 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
     } finally {
       setDescribingIndices((prev) => ({ ...prev, [index]: false }));
     }
-  }, [attachedImages, model]);
+  }, [attachedImages, model, modelList]);
 
   const handleSend = useCallback(() => {
     const msg = value.trim();

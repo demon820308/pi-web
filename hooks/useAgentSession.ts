@@ -345,6 +345,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
     // Check if current model natively supports vision
     const dynamicModel = modelList?.find(m => m.id === currentModel?.modelId && m.provider === currentModel?.provider);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const supportsVision = (dynamicModel && !!(dynamicModel as any).supportsVision) || (currentModel ? isVisionModel(currentModel.provider, currentModel.modelId) : false);
 
     // Vision model: pass image directly as content block — no intermediate conversion.
