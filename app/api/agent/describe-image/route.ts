@@ -77,8 +77,8 @@ export async function POST(req: Request) {
     const authStorage = AuthStorage.create();
     const registry = ModelRegistry.create(authStorage);
 
-    let provider = reqProvider ? reqProvider.toLowerCase() : "";
-    let modelId = reqModelId || "";
+    let provider = reqProvider ? reqProvider.toLowerCase().trim() : "";
+    let modelId = reqModelId ? reqModelId.trim() : "";
     let apiKey = "";
     let endpoint = "";
     let headers: Record<string, string> = { "Content-Type": "application/json" };
