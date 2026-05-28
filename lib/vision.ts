@@ -15,6 +15,7 @@ export function isVisionModel(provider: string, modelId: string): boolean {
     if (mid.includes("o1-mini")) return false;
     if (
       mid.includes("gpt-4o") ||
+      mid.includes("gpt-5") ||
       mid.includes("gpt-4-turbo") ||
       mid.includes("vision") ||
       mid === "o1" ||
@@ -30,7 +31,8 @@ export function isVisionModel(provider: string, modelId: string): boolean {
     if (
       mid.includes("claude-3") ||
       mid.includes("claude-4") ||
-      mid.includes("claude-5")
+      mid.includes("claude-5") ||
+      (mid.includes("claude-") && mid.includes("vision"))
     ) {
       return true;
     }
@@ -52,29 +54,36 @@ export function isVisionModel(provider: string, modelId: string): boolean {
   if (
     mid.includes("vision") ||
     mid.includes("gpt-4o") ||
+    mid.includes("gpt-5") ||
     mid.includes("claude-3") ||
     mid.includes("claude-4") ||
     mid.includes("gemini-") ||
-    mid.includes("llama-3.2-11b") ||
-    mid.includes("llama-3.2-90b") ||
-    mid.includes("llama3.2-11b") ||
-    mid.includes("llama3.2-90b") ||
     mid.includes("pixtral") ||
     mid.includes("mimo") ||
     mid.includes("-vl") ||
-    mid.includes("-v-") ||
-    mid.endsWith("-v") ||
-    mid.includes("glm-4v") ||
-    mid.includes("cogvlm") ||
-    mid.includes("internvl") ||
-    mid.includes("yi-vl") ||
-    mid.includes("step-1.5v") ||
-    mid.includes("hunyuan-vision") ||
-    mid.includes("doubao-vision") ||
+    mid.includes("molmo") ||
     mid.includes("paligemma") ||
     mid.includes("gemma-3") ||
     mid.includes("gemma-4") ||
-    mid.includes("gemma-5")
+    mid.includes("gemma-5") ||
+    // Llama vision models (Llama 3.2 11B/90B, Llama 3.3/4 Vision, etc.)
+    (mid.includes("llama") && (mid.includes("11b") || mid.includes("90b") || mid.includes("vision"))) ||
+    // Qwen VL models
+    (mid.includes("qwen") && mid.includes("vl")) ||
+    // Zhipu GLM Vision models
+    (mid.includes("glm") && (mid.includes("4v") || mid.includes("5v") || mid.includes("thinking"))) ||
+    mid.includes("cogvlm") ||
+    mid.includes("internvl") ||
+    // Yi VL models
+    (mid.includes("yi") && mid.includes("vl")) ||
+    // StepFun Vision models
+    (mid.includes("step-") && (mid.includes("v") || mid.includes("vision"))) ||
+    // Tencent Hunyuan Vision models
+    (mid.includes("hunyuan") && (mid.includes("vision") || mid.includes("vl"))) ||
+    // ByteDance Doubao Vision models
+    (mid.includes("doubao") && (mid.includes("vision") || mid.includes("vl"))) ||
+    // MiniMax Vision models
+    (mid.includes("abab") && (mid.includes("vision") || mid.includes("vl")))
   ) {
     return true;
   }
