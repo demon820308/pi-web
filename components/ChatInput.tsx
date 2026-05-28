@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
+import { isVisionModel } from "@/lib/vision";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -59,65 +60,6 @@ const THINKING_LEVEL_DESC: Record<typeof THINKING_LEVELS[number], string> = {
   xhigh: "最高强度推理",
 };
 
-function isVisionModel(provider: string, modelId: string): boolean {
-  const pid = provider.toLowerCase();
-  const mid = modelId.toLowerCase();
-
-  // If it's explicitly deepseek, it doesn't support vision
-  if (pid.includes("deepseek") || mid.includes("deepseek")) {
-    return false;
-  }
-
-  // 1. OpenAI Vision Models
-  if (pid.includes("openai")) {
-    if (mid.includes("o1-mini")) return false;
-    if (
-      mid.includes("gpt-4o") ||
-      mid.includes("gpt-4-turbo") ||
-      mid.includes("vision") ||
-      mid === "o1" ||
-      mid.startsWith("o1-202")
-    ) {
-      return true;
-    }
-    return false;
-  }
-
-  // 2. Anthropic Vision Models (Claude 3 / 3.5 series)
-  if (pid.includes("anthropic")) {
-    if (mid.includes("claude-3")) {
-      return true;
-    }
-    return false;
-  }
-
-  // 3. Gemini / Google Vision Models
-  if (pid.includes("google") || pid.includes("gemini")) {
-    if (
-      mid.includes("gemini-") ||
-      mid.includes("vision")
-    ) {
-      return true;
-    }
-    return false;
-  }
-
-  // 4. Other models (e.g. OpenRouter, Groq, local models)
-  if (
-    mid.includes("vision") ||
-    mid.includes("gpt-4o") ||
-    mid.includes("claude-3") ||
-    mid.includes("gemini-") ||
-    mid.includes("llama-3.2-11b") ||
-    mid.includes("llama-3.2-90b") ||
-    mid.includes("pixtral") ||
-    mid.includes("mimo")
-  ) {
-    return true;
-  }
-
-  return false;
-}
 
 function parseDescriptionToJSON(text: string): string {
   let coreSubject = "";
@@ -478,12 +420,8 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
     const img = attachedImages[index];
     if (!img) return;
 
-    // Check if the currently selected model supports vision dynamically based on modelList capabilities,
-    // falling back to isVisionModel for offline/fallback checks.
     const dynamicModel = modelList?.find(m => m.id === model?.modelId && m.provider === model?.provider);
-    const supportsVision = dynamicModel 
-      ? !!dynamicModel.supportsVision 
-      : (model ? isVisionModel(model.provider, model.modelId) : false);
+    const supportsVision = (dynamicModel && dynamicModel.supportsVision) || (model ? isVisionModel(model.provider, model.modelId) : false);
 
     if (!supportsVision) {
       setDescribeError("当前模型不支持，请切换模型。");

@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect, useReducer } from "react";
 import type { AgentMessage, SessionInfo, SessionTreeNode } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
+import { isVisionModel } from "@/lib/vision";
 import type { ToolEntry } from "@/components/ToolPanel";
 
 export interface SessionData {
@@ -344,7 +345,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
     // Check if current model natively supports vision
     const dynamicModel = modelList?.find(m => m.id === currentModel?.modelId && m.provider === currentModel?.provider);
-    const supportsVision = dynamicModel ? !!(dynamicModel as any).supportsVision : false;
+    const supportsVision = (dynamicModel && !!(dynamicModel as any).supportsVision) || (currentModel ? isVisionModel(currentModel.provider, currentModel.modelId) : false);
 
     // Vision model: pass image directly as content block — no intermediate conversion.
     // If the user sent only an image with no text, supply a neutral default prompt

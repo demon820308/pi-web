@@ -3,6 +3,13 @@ import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 export const dynamic = "force-dynamic";
 
+function normalizeDescription(text: string): string {
+  return text.replace(
+    /(好的，作为顶级\s*AI\s*图像提示词工程专家.*?[。！!])[\s\r\n]*[-*~_]{3,}[\s\r\n]*(###\s*(?:🖼️\s*)?深度图像拆解分析)/gi,
+    "$1\n$2"
+  );
+}
+
 export async function POST(req: Request) {
   try {
     const { image, mimeType, provider: reqProvider, modelId: reqModelId } = await req.json() as {
@@ -229,7 +236,7 @@ export async function POST(req: Request) {
       }
 
       const data = await response.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-      const description = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+      const description = normalizeDescription(data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "");
       return NextResponse.json({ description });
     } else if (provider === "anthropic") {
       const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -267,7 +274,7 @@ export async function POST(req: Request) {
       }
 
       const data = await response.json() as { content?: { text?: string }[] };
-      const description = data.content?.[0]?.text?.trim() || "";
+      const description = normalizeDescription(data.content?.[0]?.text?.trim() || "");
       return NextResponse.json({ description });
     } else {
       const imageUrl = `data:${normalizedMimeType};base64,${base64Data}`;
@@ -353,7 +360,7 @@ export async function POST(req: Request) {
         }
       }
 
-      return NextResponse.json({ description });
+      return NextResponse.json({ description: normalizeDescription(description) });
     }
   } catch (error) {
     console.error("Error in describe-image API:", error);
