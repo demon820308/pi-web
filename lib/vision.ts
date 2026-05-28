@@ -72,7 +72,9 @@ export function isVisionModel(provider: string, modelId: string): boolean {
     mid.includes("hunyuan-vision") ||
     mid.includes("doubao-vision") ||
     mid.includes("paligemma") ||
-    mid.includes("gemma-3")
+    mid.includes("gemma-3") ||
+    mid.includes("gemma-4") ||
+    mid.includes("gemma-5")
   ) {
     return true;
   }
