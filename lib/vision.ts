@@ -1,6 +1,10 @@
 export function isVisionModel(provider: string, modelId: string): boolean {
   const pid = provider.toLowerCase();
   const mid = modelId.toLowerCase();
+  // If it's explicitly a TTS (Text-To-Speech) or audio-only/voice cloning model, it doesn't support vision
+  if (mid.includes("tts") || mid.includes("voiceclone") || mid.includes("voicedesign") || mid.includes("audio-gen")) {
+    return false;
+  }
 
   // If it's explicitly deepseek, it doesn't support vision (except for deepseek-vl, deepseek-vl2, deepseek-v4, janus, deepseek-ocr)
   if (pid.includes("deepseek") || mid.includes("deepseek")) {
