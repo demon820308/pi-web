@@ -2,6 +2,7 @@
 
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
 import { isVisionModel } from "@/lib/vision";
+import { encodeFilePathForApi, joinFilePath } from "@/lib/file-paths";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -38,12 +39,14 @@ interface Props {
   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
   soundEnabled?: boolean;
   onSoundToggle?: () => void;
+  cwd?: string | null;
 }
 
 export interface ChatInputHandle {
   insertText: (text: string) => void;
   insertIfEmpty: (text: string) => void;
   addImages: (files: File[]) => void;
+  addFiles: (files: File[]) => void;
 }
 
 const TOOL_PRESETS = ["off", "default", "full"] as const;
@@ -254,6 +257,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   retryInfo,
   soundEnabled, onSoundToggle,
+  cwd,
 }: Props, ref) {
   const [value, setValue] = useState("");
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
@@ -261,6 +265,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [attachedFiles, setAttachedFiles] = useState<{ file: File; name: string; size: number }[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   const [describingIndices, setDescribingIndices] = useState<Record<number, boolean>>({});
   const [describeError, setDescribeError] = useState<string | null>(null);
   const [promptModalOpen, setPromptModalOpen] = useState(false);
@@ -281,6 +287,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const toolDropdownRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileUploadInputRef = useRef<HTMLInputElement>(null);
 
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
@@ -319,6 +326,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     },
     addImages(files: File[]) {
       processImageFiles(files);
+    },
+    addFiles(files: File[]) {
+      processFiles(files);
     },
   }));
 
@@ -414,6 +424,32 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
     });
   }, []);
 
+  const processFiles = useCallback((files: File[]) => {
+    const newFiles = files.map((file) => ({
+      file,
+      name: file.name,
+      size: file.size,
+    }));
+    setAttachedFiles((prev) => [...prev, ...newFiles]);
+  }, []);
+
+  const removeFile = useCallback((index: number) => {
+    setAttachedFiles((prev) => {
+      const next = [...prev];
+      next.splice(index, 1);
+      return next;
+    });
+  }, []);
+
+  const formatBytes = useCallback((bytes: number) => {
+    if (bytes === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  }, []);
+
+
   const handleDescribe = useCallback(async (index: number) => {
     const img = attachedImages[index];
     if (!img) return;
@@ -468,10 +504,10 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
     }
   }, [attachedImages, model, modelList]);
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
     const msg = value.trim();
-    if (!msg && !attachedImages.length) return;
-    if (isStreaming) return;
+    if (!msg && !attachedImages.length && !attachedFiles.length) return;
+    if (isStreaming || isUploading) return;
 
     if (attachedImages.length > 0) {
       const dynamicModel = modelList?.find(m => m.id === model?.modelId && m.provider === model?.provider);
@@ -482,17 +518,54 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
       }
     }
 
-    onSend(msg, attachedImages.length ? attachedImages : undefined);
+    let finalMsg = msg;
+    if (attachedFiles.length > 0) {
+      if (!cwd) {
+        setDescribeError("无法获取当前工作区路径，文件上传失败。");
+        return;
+      }
+      setIsUploading(true);
+      setDescribeError(null);
+      try {
+        const uploaded = await Promise.all(
+          attachedFiles.map(async (f) => {
+            const destPath = joinFilePath(cwd, f.name);
+            const encoded = encodeFilePathForApi(destPath);
+            const res = await fetch(`/api/files/${encoded}`, {
+              method: "POST",
+              body: f.file,
+            });
+            if (!res.ok) {
+              const data = await res.json().catch(() => ({}));
+              throw new Error(data.error || `上传文件 ${f.name} 失败`);
+            }
+            return f;
+          })
+        );
+        const uploadedNotes = "\n\n📄 [已上传文件到工作区]\n" + uploaded.map(f => `- ${f.name} (${formatBytes(f.size)})`).join("\n");
+        finalMsg = finalMsg ? `${finalMsg}${uploadedNotes}` : uploadedNotes.trim();
+        setAttachedFiles([]);
+      } catch (err: any) {
+        console.error("Upload error:", err);
+        setDescribeError(err.message || "上传文件过程中出现未知错误");
+        setIsUploading(false);
+        return;
+      }
+      setIsUploading(false);
+    }
+
+    onSend(finalMsg, attachedImages.length ? attachedImages : undefined);
     setValue("");
     clearImages();
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [value, attachedImages, isStreaming, onSend, clearImages, model, modelList]);
+  }, [value, attachedImages, attachedFiles, isStreaming, isUploading, onSend, clearImages, model, modelList, cwd, formatBytes]);
 
-  const sendQueued = useCallback((mode: "steer" | "followup") => {
+  const sendQueued = useCallback(async (mode: "steer" | "followup") => {
     const msg = value.trim();
-    if (!msg && !attachedImages.length) return;
+    if (!msg && !attachedImages.length && !attachedFiles.length) return;
+    if (isUploading) return;
 
     if (attachedImages.length > 0) {
       const dynamicModel = modelList?.find(m => m.id === model?.modelId && m.provider === model?.provider);
@@ -503,15 +576,51 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
       }
     }
 
+    let finalMsg = msg;
+    if (attachedFiles.length > 0) {
+      if (!cwd) {
+        setDescribeError("无法获取当前工作区路径，文件上传失败。");
+        return;
+      }
+      setIsUploading(true);
+      setDescribeError(null);
+      try {
+        const uploaded = await Promise.all(
+          attachedFiles.map(async (f) => {
+            const destPath = joinFilePath(cwd, f.name);
+            const encoded = encodeFilePathForApi(destPath);
+            const res = await fetch(`/api/files/${encoded}`, {
+              method: "POST",
+              body: f.file,
+            });
+            if (!res.ok) {
+              const data = await res.json().catch(() => ({}));
+              throw new Error(data.error || `上传文件 ${f.name} 失败`);
+            }
+            return f;
+          })
+        );
+        const uploadedNotes = "\n\n📄 [已上传文件到工作区]\n" + uploaded.map(f => `- ${f.name} (${formatBytes(f.size)})`).join("\n");
+        finalMsg = finalMsg ? `${finalMsg}${uploadedNotes}` : uploadedNotes.trim();
+        setAttachedFiles([]);
+      } catch (err: any) {
+        console.error("Upload error:", err);
+        setDescribeError(err.message || "上传文件过程中出现未知错误");
+        setIsUploading(false);
+        return;
+      }
+      setIsUploading(false);
+    }
+
     if (mode === "steer" && onSteer) {
-      onSteer(msg, attachedImages.length ? attachedImages : undefined);
+      onSteer(finalMsg, attachedImages.length ? attachedImages : undefined);
     } else if (mode === "followup" && onFollowUp) {
-      onFollowUp(msg, attachedImages.length ? attachedImages : undefined);
+      onFollowUp(finalMsg, attachedImages.length ? attachedImages : undefined);
     }
     setValue("");
     clearImages();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, attachedImages, onSteer, onFollowUp, clearImages, model, modelList]);
+  }, [value, attachedImages, attachedFiles, onSteer, onFollowUp, clearImages, model, modelList, cwd, isUploading, formatBytes]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -611,6 +720,17 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
           processImageFiles(files);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={fileUploadInputRef}
+        type="file"
+        multiple
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          processFiles(files);
           e.target.value = "";
         }}
       />
@@ -747,6 +867,91 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
           </div>
         )}
 
+        {/* Upload status banner */}
+        {isUploading && (
+          <div style={{
+            marginBottom: 8, padding: "5px 10px",
+            background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.25)",
+            borderRadius: 6, fontSize: 12, color: "var(--accent)",
+            display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}>
+              <circle cx="12" cy="12" r="10" stroke="rgba(59,130,246,0.2)" />
+              <path d="M12 2a10 10 0 0 1 10 10" />
+            </svg>
+            Uploading {attachedFiles.length} file(s) to workspace…
+          </div>
+        )}
+
+        {/* File previews */}
+        {attachedFiles.length > 0 && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+            {attachedFiles.map((fileObj, i) => (
+              <div
+                key={i}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "5px 10px",
+                  background: "var(--bg-panel)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  fontSize: 12,
+                  color: "var(--text)",
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+                  position: "relative",
+                  transition: "background 0.15s",
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                <span style={{ maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={fileObj.name}>
+                  {fileObj.name}
+                </span>
+                <span style={{ fontSize: 10, color: "var(--text-dim)", flexShrink: 0 }}>
+                  {formatBytes(fileObj.size)}
+                </span>
+                <button
+                  onClick={() => removeFile(i)}
+                  disabled={isUploading}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "rgba(255,255,255,0.05)",
+                    border: "none",
+                    color: "var(--text-muted)",
+                    cursor: isUploading ? "not-allowed" : "pointer",
+                    padding: 0,
+                    marginLeft: 2,
+                    fontSize: 10,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (isUploading) return;
+                    e.currentTarget.style.background = "var(--bg-hover)";
+                    e.currentTarget.style.color = "#ef4444";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+                    e.currentTarget.style.color = "var(--text-muted)";
+                  }}
+                >
+                  <svg width="6" height="6" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                    <line x1="1" y1="1" x2="7" y2="7" /><line x1="7" y1="1" x2="1" y2="7" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+
         {/* Main input */}
         <div
           style={{
@@ -798,16 +1003,16 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
               {onSteer && (
                 <button
                   onClick={() => sendQueued("steer")}
-                  disabled={!value.trim() && !attachedImages.length}
+                  disabled={!value.trim() && !attachedImages.length && !attachedFiles.length}
                   title="打断 Agent 当前运行，立即注入消息"
                   style={{
                     display: "flex", alignItems: "center", gap: 5,
                     padding: "7px 12px",
-                    background: (value.trim() || attachedImages.length) ? "rgba(234,179,8,0.12)" : "none",
+                    background: (value.trim() || attachedImages.length || attachedFiles.length) ? "rgba(234,179,8,0.12)" : "none",
                     border: "1px solid rgba(234,179,8,0.35)",
                     borderRadius: 8,
-                    color: (value.trim() || attachedImages.length) ? "rgba(180,130,0,1)" : "var(--text-dim)",
-                    cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
+                    color: (value.trim() || attachedImages.length || attachedFiles.length) ? "rgba(180,130,0,1)" : "var(--text-dim)",
+                    cursor: (value.trim() || attachedImages.length || attachedFiles.length) ? "pointer" : "not-allowed",
                     fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
                     transition: "background 0.12s",
                   }}
@@ -821,16 +1026,16 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
               {onFollowUp && (
                 <button
                   onClick={() => sendQueued("followup")}
-                  disabled={!value.trim() && !attachedImages.length}
+                  disabled={!value.trim() && !attachedImages.length && !attachedFiles.length}
                   title="在 Agent 完成后排队发送"
                   style={{
                     display: "flex", alignItems: "center", gap: 5,
                     padding: "7px 12px",
-                    background: (value.trim() || attachedImages.length) ? "rgba(129,140,248,0.12)" : "none",
+                    background: (value.trim() || attachedImages.length || attachedFiles.length) ? "rgba(129,140,248,0.12)" : "none",
                     border: "1px solid rgba(129,140,248,0.35)",
                     borderRadius: 8,
-                    color: (value.trim() || attachedImages.length) ? "rgba(99,102,241,1)" : "var(--text-dim)",
-                    cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
+                    color: (value.trim() || attachedImages.length || attachedFiles.length) ? "rgba(99,102,241,1)" : "var(--text-dim)",
+                    cursor: (value.trim() || attachedImages.length || attachedFiles.length) ? "pointer" : "not-allowed",
                     fontSize: 13, fontWeight: 600, letterSpacing: "-0.01em",
                     transition: "background 0.12s",
                   }}
@@ -846,21 +1051,21 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
           ) : (
             <button
               onClick={handleSend}
-              disabled={!value.trim() && !attachedImages.length}
+              disabled={!value.trim() && !attachedImages.length && !attachedFiles.length}
               style={{
                 flexShrink: 0,
                 alignSelf: "flex-end",
                 display: "flex", alignItems: "center", gap: 6,
                 padding: "7px 14px",
-                background: (value.trim() || attachedImages.length) ? "var(--accent)" : "var(--bg-panel)",
+                background: (value.trim() || attachedImages.length || attachedFiles.length) ? "var(--accent)" : "var(--bg-panel)",
                 border: "none",
                 borderRadius: 8,
-                color: (value.trim() || attachedImages.length) ? "#fff" : "var(--text-dim)",
-                cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
+                color: (value.trim() || attachedImages.length || attachedFiles.length) ? "#fff" : "var(--text-dim)",
+                cursor: (value.trim() || attachedImages.length || attachedFiles.length) ? "pointer" : "not-allowed",
                 fontSize: 13,
                 fontWeight: 600,
                 letterSpacing: "-0.01em",
-                boxShadow: (value.trim() || attachedImages.length) ? "0 1px 3px rgba(37,99,235,0.25)" : "none",
+                boxShadow: (value.trim() || attachedImages.length || attachedFiles.length) ? "0 1px 3px rgba(37,99,235,0.25)" : "none",
                 transition: "background 0.15s, box-shadow 0.15s",
               }}
             >
@@ -906,6 +1111,34 @@ function compressAndResizeImage(file: File, maxWidth = 1024, maxHeight = 1024, q
                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
                 <circle cx="8.5" cy="8.5" r="1.5" />
                 <polyline points="21 15 16 10 5 21" />
+              </svg>
+            </button>
+            <button
+              onClick={() => fileUploadInputRef.current?.click()}
+              disabled={isStreaming || isUploading}
+              title="Upload files to workspace"
+              style={{
+                flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                width: 32, height: 32, padding: 0,
+                background: "none", border: "none",
+                borderRadius: 9,
+                color: attachedFiles.length ? "var(--accent)" : "var(--text-muted)",
+                cursor: (isStreaming || isUploading) ? "not-allowed" : "pointer",
+                opacity: (isStreaming || isUploading) ? 0.5 : 1,
+                transition: "background 0.12s, color 0.12s",
+              }}
+              onMouseEnter={(e) => {
+                if (isStreaming || isUploading) return;
+                e.currentTarget.style.background = "var(--bg-hover)";
+                e.currentTarget.style.color = attachedFiles.length ? "var(--accent)" : "var(--text)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "none";
+                e.currentTarget.style.color = attachedFiles.length ? "var(--accent)" : "var(--text-muted)";
+              }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
               </svg>
             </button>
             {/* Model selector — visible always, disabled during streaming */}

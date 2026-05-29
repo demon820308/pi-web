@@ -168,7 +168,14 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   useEffect(() => () => { onContextUsageChange?.(null); }, [onContextUsageChange]);
 
   const onDrop = useCallback((files: File[]) => {
-    chatInputRef?.current?.addImages(files);
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    const nonImages = files.filter((f) => !f.type.startsWith("image/"));
+    if (images.length > 0) {
+      chatInputRef?.current?.addImages(images);
+    }
+    if (nonImages.length > 0) {
+      chatInputRef?.current?.addFiles?.(nonImages);
+    }
   }, [chatInputRef]);
 
   const { isDragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(onDrop);
@@ -211,6 +218,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       retryInfo={retryInfo}
       soundEnabled={soundEnabled}
       onSoundToggle={onSoundToggle}
+      cwd={session?.cwd ?? newSessionCwd ?? null}
     />
   );
 

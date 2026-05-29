@@ -67,11 +67,92 @@ function copyText(text: string): Promise<void> {
 }
 
 export function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp }: Props) {
+  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
+
+  const lightbox = zoomedImage && (
+    <div
+      onClick={() => setZoomedImage(null)}
+      style={{
+        position: "fixed",
+        top: 0, left: 0, right: 0, bottom: 0,
+        background: "rgba(15, 23, 42, 0.85)",
+        backdropFilter: "blur(12px) saturate(180%)",
+        WebkitBackdropFilter: "blur(12px) saturate(180%)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 99999,
+        cursor: "zoom-out",
+        animation: "fadeIn 0.2s ease-out",
+      }}
+    >
+      <style>{`
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes scaleUp { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+      `}</style>
+      <div style={{ position: "relative", maxWidth: "90vw", maxHeight: "90vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={zoomedImage}
+          alt="Zoomed"
+          style={{
+            maxWidth: "90vw",
+            maxHeight: "90vh",
+            objectFit: "contain",
+            borderRadius: 8,
+            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+            animation: "scaleUp 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)",
+          }}
+        />
+        <button
+          onClick={(e) => { e.stopPropagation(); setZoomedImage(null); }}
+          style={{
+            position: "fixed",
+            top: 20,
+            right: 20,
+            width: 40,
+            height: 40,
+            borderRadius: "50%",
+            background: "rgba(255, 255, 255, 0.1)",
+            border: "none",
+            color: "#fff",
+            fontSize: 24,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            transition: "background 0.15s, transform 0.15s",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(255, 255, 255, 0.2)";
+            e.currentTarget.style.transform = "scale(1.08)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
+            e.currentTarget.style.transform = "scale(1)";
+          }}
+        >
+          ×
+        </button>
+      </div>
+    </div>
+  );
+
   if (message.role === "user") {
-    return <UserMessageView message={message as UserMessage} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} />;
+    return (
+      <>
+        <UserMessageView message={message as UserMessage} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} onZoomImage={setZoomedImage} />
+        {lightbox}
+      </>
+    );
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} />;
+    return (
+      <>
+        <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} onZoomImage={setZoomedImage} />
+        {lightbox}
+      </>
+    );
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -80,7 +161,7 @@ export function MessageView({ message, isStreaming, toolResults, modelNames, ent
   return null;
 }
 
-function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent }: {
+function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, onZoomImage }: {
   message: UserMessage;
   entryId?: string;
   onFork?: (entryId: string) => void;
@@ -88,6 +169,7 @@ function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAs
   onNavigate?: (entryId: string) => void;
   prevAssistantEntryId?: string;
   onEditContent?: (content: string) => void;
+  onZoomImage?: (src: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -157,7 +239,8 @@ function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAs
                     key={i}
                     src={src}
                     alt=""
-                    style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid rgba(59,130,246,0.15)" }}
+                    onClick={() => onZoomImage?.(src)}
+                    style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid rgba(59,130,246,0.15)", cursor: "zoom-in" }}
                   />
                 );
               })}
@@ -286,6 +369,7 @@ function AssistantMessageView({
   modelNames,
   showTimestamp,
   prevTimestamp,
+  onZoomImage,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -293,6 +377,7 @@ function AssistantMessageView({
   modelNames?: Record<string, string>;
   showTimestamp?: boolean;
   prevTimestamp?: number;
+  onZoomImage?: (src: string) => void;
 }) {
   const time = showTimestamp ? formatTime(message.timestamp) : null;
   const blocks = message.content ?? [];
@@ -452,7 +537,7 @@ function AssistantMessageView({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {blocks.map((block, i) => (
-          <BlockView key={i} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(i) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} />
+          <BlockView key={i} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(i) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} onZoomImage={onZoomImage} />
         ))}
         {isStreaming && blocks.length === 0 && (
           <div style={{ 
@@ -537,9 +622,9 @@ function AssistantMessageView({
   );
 }
 
-function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number> }) {
+function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations, onZoomImage }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; onZoomImage?: (src: string) => void }) {
   if (block.type === "text") {
-    return <TextBlock block={block as TextContent} />;
+    return <TextBlock block={block as TextContent} onZoomImage={onZoomImage} />;
   }
   if (block.type === "thinking") {
     return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} />;
@@ -553,12 +638,25 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
   return null;
 }
 
-function TextBlock({ block }: { block: TextContent }) {
+function TextBlock({ block, onZoomImage }: { block: TextContent; onZoomImage?: (src: string) => void }) {
   return (
     <div className="markdown-body">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
+          img({ src, alt }) {
+            return (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={src}
+                alt={alt}
+                style={{ cursor: "zoom-in", maxWidth: "100%", borderRadius: 6, border: "1px solid var(--border)" }}
+                onClick={() => {
+                  if (typeof src === "string") onZoomImage?.(src);
+                }}
+              />
+            );
+          },
           code({ className, children, ...props }) {
             const lang = className?.replace("language-", "") ?? "";
             const raw = String(children);

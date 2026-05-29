@@ -394,3 +394,33 @@ export async function GET(
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  try {
+    const { path: segments } = await params;
+    const filePath = filePathFromSegments(segments);
+
+    const allowedRoots = await getAllowedRoots();
+    if (!isPathAllowed(filePath, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+
+    const data = await request.arrayBuffer();
+
+    // Ensure the parent directory exists
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    fs.writeFileSync(filePath, Buffer.from(data));
+
+    return NextResponse.json({ success: true, path: filePath });
+  } catch (error) {
+    return NextResponse.json({ error: String(error) }, { status: 500 });
+  }
+}
+
