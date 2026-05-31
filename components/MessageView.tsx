@@ -70,6 +70,160 @@ function copyText(text: string): Promise<void> {
   }
 }
 
+interface ParsedAttachment {
+  name: string;
+  path: string;
+  size?: string;
+}
+
+function parseAttachments(text: string): { cleanText: string; attachments: ParsedAttachment[] } {
+  if (!text) return { cleanText: "", attachments: [] };
+
+  const startTag = "<!-- PI_FILE_ATTACHMENTS_START -->";
+  const endTag = "<!-- PI_FILE_ATTACHMENTS_END -->";
+
+  const startIndex = text.indexOf(startTag);
+  const endIndex = text.indexOf(endTag);
+
+  if (startIndex === -1 || endIndex === -1 || startIndex >= endIndex) {
+    return { cleanText: text, attachments: [] };
+  }
+
+  const before = text.substring(0, startIndex);
+  const after = text.substring(endIndex + endTag.length);
+  const inner = text.substring(startIndex + startTag.length, endIndex).trim();
+
+  const cleanText = (before.trim() + "\n" + after.trim()).trim();
+
+  const attachments: ParsedAttachment[] = [];
+  const lines = inner.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith("📄") || trimmed.includes("已上传文件")) continue;
+
+    const match = trimmed.match(/^[-*]\s+(.+?)(?:\s+\((.+?)\))?$/) || trimmed.match(/^(.+?)(?:\s+\((.+?)\))?$/);
+    if (match) {
+      const fullPath = match[1].trim();
+      const size = match[2]?.trim();
+      const parts = fullPath.split(/[/\\]/);
+      const name = parts[parts.length - 1] || fullPath;
+      attachments.push({
+        name,
+        path: fullPath,
+        size
+      });
+    }
+  }
+
+  return { cleanText, attachments };
+}
+
+function AttachmentChips({ attachments }: { attachments: ParsedAttachment[] }) {
+  if (!attachments || attachments.length === 0) return null;
+
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+      {attachments.map((file, idx) => {
+        const isAudio = /\.(wav|mp3|ogg|m4a|webm|aac)$/i.test(file.name);
+        const isImage = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(file.name);
+        const isCode = /\.(js|jsx|ts|tsx|json|html|css|py|go|rs|cpp|c|h|sh|bat|md)$/i.test(file.name);
+        
+        let iconColor = "var(--text-dim)";
+        let bgLight = "rgba(255, 255, 255, 0.03)";
+        let borderStyle = "1px solid var(--border)";
+        
+        if (isAudio) {
+          iconColor = "var(--accent)";
+          bgLight = "rgba(59, 130, 246, 0.05)";
+          borderStyle = "1px solid rgba(59, 130, 246, 0.15)";
+        } else if (isImage) {
+          iconColor = "#e11d48";
+          bgLight = "rgba(225, 29, 72, 0.05)";
+          borderStyle = "1px solid rgba(225, 29, 72, 0.15)";
+        } else if (isCode) {
+          iconColor = "#10b981";
+          bgLight = "rgba(16, 185, 129, 0.05)";
+          borderStyle = "1px solid rgba(16, 185, 129, 0.15)";
+        }
+
+        return (
+          <div
+            key={idx}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "6px 12px",
+              background: bgLight,
+              border: borderStyle,
+              borderRadius: 8,
+              fontSize: 12.5,
+              color: "var(--text)",
+              maxWidth: 280,
+              boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
+              transition: "transform 0.15s ease, background 0.15s ease, border-color 0.15s ease",
+              cursor: "default",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = "translateY(-1px)";
+              e.currentTarget.style.background = isAudio ? "rgba(59, 130, 246, 0.09)" : isImage ? "rgba(225, 29, 72, 0.09)" : isCode ? "rgba(16, 185, 129, 0.09)" : "rgba(255, 255, 255, 0.06)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "translateY(0)";
+              e.currentTarget.style.background = bgLight;
+            }}
+          >
+            <span style={{ display: "flex", alignItems: "center", color: iconColor }}>
+              {isAudio ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                </svg>
+              ) : isImage ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <polyline points="21 15 16 10 5 21" />
+                </svg>
+              ) : isCode ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="16 18 22 12 16 6" />
+                  <polyline points="8 6 2 12 8 18" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+              )}
+            </span>
+            <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+              <span
+                style={{
+                  fontWeight: 500,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  lineHeight: 1.2,
+                }}
+                title={file.path}
+              >
+                {file.name}
+              </span>
+              {file.size && (
+                <span style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>
+                  {file.size}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, activeModel, prevUserContent }: Props) {
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
@@ -178,13 +332,17 @@ function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAs
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const content =
+  const rawContent =
     typeof message.content === "string"
       ? message.content
       : message.content
           .filter((b): b is TextContent => b.type === "text")
           .map((b) => b.text)
           .join("\n");
+
+  const { cleanText, attachments } = useMemo(() => {
+    return parseAttachments(rawContent);
+  }, [rawContent]);
 
   const imageBlocks: ImageContent[] =
     typeof message.content === "string"
@@ -196,7 +354,7 @@ function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAs
   const canNavigate = !!prevAssistantEntryId && !!onNavigate;
 
   const copyContent = () => {
-    copyText(content).then(() => {
+    copyText(cleanText).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
@@ -225,7 +383,7 @@ function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAs
           }}
         >
           {imageBlocks.length > 0 && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: content ? 8 : 0 }}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: cleanText ? 8 : 0 }}>
               {imageBlocks.map((img, i) => {
                 // lib/types.ts ImageContent uses {source:{type,data,media_type,url}}
                 // pi-ai on-disk format uses flat {data, mimeType} — handle both
@@ -250,7 +408,8 @@ function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAs
               })}
             </div>
           )}
-          {content}
+          {cleanText}
+          <AttachmentChips attachments={attachments} />
         </div>
 
       </div>
@@ -306,7 +465,7 @@ function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAs
             }}>
               {canNavigate && (
                 <button
-                  onClick={() => { onNavigate!(prevAssistantEntryId!); onEditContent?.(content); }}
+                  onClick={() => { onNavigate!(prevAssistantEntryId!); onEditContent?.(cleanText); }}
                   title="Edit from here — branches within this session"
                   style={{
                     display: "flex", alignItems: "center", gap: 4,
@@ -587,26 +746,30 @@ function AssistantMessageView({
         {blocks.map((block, i) => (
           <BlockView key={i} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(i) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} onZoomImage={onZoomImage} />
         ))}
-        {isFallback && (
-          <div style={{
-            border: "1px dashed rgba(59,130,246,0.35)",
-            background: "rgba(59,130,246,0.015)",
-            borderRadius: 8,
-            padding: "10px 14px",
-            fontSize: 13,
-            color: "var(--text)",
-            lineHeight: 1.6,
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--accent)", fontWeight: 600, marginBottom: 6 }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-              </svg>
-              待播报文本 (Speech prompt text):
+        {isFallback && (() => {
+          const { cleanText: fallbackCleanText, attachments: fallbackAttachments } = parseAttachments(prevUserContent || "");
+          return (
+            <div style={{
+              border: "1px dashed rgba(59,130,246,0.35)",
+              background: "rgba(59,130,246,0.015)",
+              borderRadius: 8,
+              padding: "10px 14px",
+              fontSize: 13,
+              color: "var(--text)",
+              lineHeight: 1.6,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--accent)", fontWeight: 600, marginBottom: 6 }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                </svg>
+                待播报文本 (Speech prompt text):
+              </div>
+              <div style={{ whiteSpace: "pre-wrap", color: "var(--text-muted)", fontSize: 12.5 }}>{fallbackCleanText}</div>
+              <AttachmentChips attachments={fallbackAttachments} />
             </div>
-            <div style={{ whiteSpace: "pre-wrap", color: "var(--text-muted)", fontSize: 12.5 }}>{prevUserContent}</div>
-          </div>
-        )}
+          );
+        })()}
         {isStreaming && blocks.length === 0 && (
           <div style={{ 
             display: "flex", 
