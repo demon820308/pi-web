@@ -36,6 +36,7 @@ interface Props {
   prevTimestamp?: number;
   activeModel?: { provider: string; modelId: string } | null;
   prevUserContent?: string;
+  cwd?: string | null;
 }
 
 function formatTime(ts?: number): string | null {
@@ -119,112 +120,197 @@ function parseAttachments(text: string): { cleanText: string; attachments: Parse
   return { cleanText, attachments };
 }
 
-function AttachmentChips({ attachments }: { attachments: ParsedAttachment[] }) {
-  if (!attachments || attachments.length === 0) return null;
+function AttachmentChip({ file, cwd }: { file: ParsedAttachment; cwd?: string | null }) {
+  const isAudio = /\.(wav|mp3|ogg|m4a|webm|aac)$/i.test(file.name);
+  const isImage = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(file.name);
+  const isCode = /\.(js|jsx|ts|tsx|json|html|css|py|go|rs|cpp|c|h|sh|bat|md)$/i.test(file.name);
+
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const togglePlay = (e: React.MouseEvent) => {
+    if (!isAudio) return;
+    e.stopPropagation();
+
+    if (isPlaying) {
+      audioRef.current?.pause();
+      setIsPlaying(false);
+    } else {
+      if (!audioRef.current) {
+        let fullPath = file.path;
+        if (cwd && !/^[a-zA-Z]:/i.test(fullPath) && !fullPath.startsWith("/")) {
+          const cleanCwd = cwd.replace(/[\\/]+$/, "");
+          fullPath = `${cleanCwd}/${file.path}`;
+        }
+        
+        const encoded = fullPath
+          .replace(/\\/g, "/")
+          .split("/")
+          .filter(Boolean)
+          .map(encodeURIComponent)
+          .join("/");
+
+        const url = `/api/files/${encoded}?type=read`;
+        const audio = new Audio(url);
+        audio.onended = () => setIsPlaying(false);
+        audio.onerror = () => setIsPlaying(false);
+        audioRef.current = audio;
+      }
+      audioRef.current.play().catch(() => setIsPlaying(false));
+      setIsPlaying(true);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
+  let iconColor = "var(--text-dim)";
+  let bgLight = "rgba(255, 255, 255, 0.03)";
+  let borderStyle = "1px solid var(--border)";
+  let hoverBg = "rgba(255, 255, 255, 0.06)";
+
+  if (isAudio) {
+    iconColor = "var(--accent)";
+    bgLight = "rgba(59, 130, 246, 0.05)";
+    borderStyle = "1px solid rgba(59, 130, 246, 0.15)";
+    hoverBg = "rgba(59, 130, 246, 0.09)";
+  } else if (isImage) {
+    iconColor = "#e11d48";
+    bgLight = "rgba(225, 29, 72, 0.05)";
+    borderStyle = "1px solid rgba(225, 29, 72, 0.15)";
+    hoverBg = "rgba(225, 29, 72, 0.09)";
+  } else if (isCode) {
+    iconColor = "#10b981";
+    bgLight = "rgba(16, 185, 129, 0.05)";
+    borderStyle = "1px solid rgba(16, 185, 129, 0.15)";
+    hoverBg = "rgba(16, 185, 129, 0.09)";
+  }
 
   return (
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-      {attachments.map((file, idx) => {
-        const isAudio = /\.(wav|mp3|ogg|m4a|webm|aac)$/i.test(file.name);
-        const isImage = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(file.name);
-        const isCode = /\.(js|jsx|ts|tsx|json|html|css|py|go|rs|cpp|c|h|sh|bat|md)$/i.test(file.name);
-        
-        let iconColor = "var(--text-dim)";
-        let bgLight = "rgba(255, 255, 255, 0.03)";
-        let borderStyle = "1px solid var(--border)";
-        
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "6px 12px",
+        background: bgLight,
+        border: borderStyle,
+        borderRadius: 8,
+        fontSize: 12.5,
+        color: "var(--text)",
+        maxWidth: 320,
+        boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
+        transition: "transform 0.15s ease, background 0.15s ease, border-color 0.15s ease",
+        cursor: isAudio ? "pointer" : "default",
+        userSelect: "none",
+      }}
+      onClick={isAudio ? togglePlay : undefined}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.transform = "translateY(-1px)";
+        e.currentTarget.style.background = hoverBg;
         if (isAudio) {
-          iconColor = "var(--accent)";
-          bgLight = "rgba(59, 130, 246, 0.05)";
-          borderStyle = "1px solid rgba(59, 130, 246, 0.15)";
-        } else if (isImage) {
-          iconColor = "#e11d48";
-          bgLight = "rgba(225, 29, 72, 0.05)";
-          borderStyle = "1px solid rgba(225, 29, 72, 0.15)";
-        } else if (isCode) {
-          iconColor = "#10b981";
-          bgLight = "rgba(16, 185, 129, 0.05)";
-          borderStyle = "1px solid rgba(16, 185, 129, 0.15)";
+          e.currentTarget.style.borderColor = "var(--accent)";
         }
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = "translateY(0)";
+        e.currentTarget.style.background = bgLight;
+        e.currentTarget.style.borderColor = isAudio ? "rgba(59, 130, 246, 0.15)" : isImage ? "rgba(225, 29, 72, 0.15)" : isCode ? "rgba(16, 185, 129, 0.15)" : "var(--border)";
+      }}
+    >
+      <span style={{ display: "flex", alignItems: "center", color: iconColor, flexShrink: 0 }}>
+        {isAudio ? (
+          isPlaying ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "pulse 1s infinite" }}>
+              <rect x="6" y="4" width="4" height="16" />
+              <rect x="14" y="4" width="4" height="16" />
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+            </svg>
+          )
+        ) : isImage ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <polyline points="21 15 16 10 5 21" />
+          </svg>
+        ) : isCode ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="16 18 22 12 16 6" />
+            <polyline points="8 6 2 12 8 18" />
+          </svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+          </svg>
+        )}
+      </span>
 
-        return (
-          <div
-            key={idx}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "6px 12px",
-              background: bgLight,
-              border: borderStyle,
-              borderRadius: 8,
-              fontSize: 12.5,
-              color: "var(--text)",
-              maxWidth: 280,
-              boxShadow: "0 1px 2px rgba(0, 0, 0, 0.05)",
-              transition: "transform 0.15s ease, background 0.15s ease, border-color 0.15s ease",
-              cursor: "default",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "translateY(-1px)";
-              e.currentTarget.style.background = isAudio ? "rgba(59, 130, 246, 0.09)" : isImage ? "rgba(225, 29, 72, 0.09)" : isCode ? "rgba(16, 185, 129, 0.09)" : "rgba(255, 255, 255, 0.06)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.background = bgLight;
-            }}
-          >
-            <span style={{ display: "flex", alignItems: "center", color: iconColor }}>
-              {isAudio ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                </svg>
-              ) : isImage ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                  <circle cx="8.5" cy="8.5" r="1.5" />
-                  <polyline points="21 15 16 10 5 21" />
-                </svg>
-              ) : isCode ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="16 18 22 12 16 6" />
-                  <polyline points="8 6 2 12 8 18" />
-                </svg>
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                </svg>
-              )}
-            </span>
-            <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-              <span
-                style={{
-                  fontWeight: 500,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  lineHeight: 1.2,
-                }}
-                title={file.path}
-              >
-                {file.name}
-              </span>
-              {file.size && (
-                <span style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>
-                  {file.size}
-                </span>
-              )}
-            </div>
-          </div>
-        );
-      })}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, overflow: "hidden" }}>
+        <span
+          style={{
+            fontWeight: 500,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            maxWidth: 180,
+          }}
+          title={file.path}
+        >
+          {file.name}
+        </span>
+        {file.size && (
+          <span style={{ fontSize: 10, color: "var(--text-dim)", flexShrink: 0 }}>
+            ({file.size})
+          </span>
+        )}
+      </div>
+
+      {isAudio && isPlaying && (
+        <div style={{ display: "flex", gap: 1.5, alignItems: "flex-end", height: 11, marginLeft: 4, flexShrink: 0 }}>
+          <style>{`
+            @keyframes chipTtsJump {
+              0%, 100% { height: 3px; }
+              50% { height: 11px; }
+            }
+            .chip-tts-wave-bar {
+              width: 1.5px;
+              background: var(--accent);
+              border-radius: 0.8px;
+            }
+          `}</style>
+          <span className="chip-tts-wave-bar" style={{ height: 6, animation: "chipTtsJump 0.8s ease-in-out infinite" }} />
+          <span className="chip-tts-wave-bar" style={{ height: 11, animation: "chipTtsJump 0.8s ease-in-out infinite 0.15s" }} />
+          <span className="chip-tts-wave-bar" style={{ height: 4, animation: "chipTtsJump 0.8s ease-in-out infinite 0.3s" }} />
+        </div>
+      )}
     </div>
   );
 }
 
-export function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, activeModel, prevUserContent }: Props) {
+function AttachmentChips({ attachments, cwd }: { attachments: ParsedAttachment[]; cwd?: string | null }) {
+  if (!attachments || attachments.length === 0) return null;
+
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+      {attachments.map((file, idx) => (
+        <AttachmentChip key={idx} file={file} cwd={cwd} />
+      ))}
+    </div>
+  );
+}
+
+export function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, activeModel, prevUserContent, cwd }: Props) {
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
   const lightbox = zoomedImage && (
@@ -299,7 +385,7 @@ export function MessageView({ message, isStreaming, toolResults, modelNames, ent
   if (message.role === "user") {
     return (
       <>
-        <UserMessageView message={message as UserMessage} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} onZoomImage={setZoomedImage} />
+        <UserMessageView message={message as UserMessage} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} onZoomImage={setZoomedImage} cwd={cwd} />
         {lightbox}
       </>
     );
@@ -307,7 +393,7 @@ export function MessageView({ message, isStreaming, toolResults, modelNames, ent
   if (message.role === "assistant") {
     return (
       <>
-        <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} onZoomImage={setZoomedImage} activeModel={activeModel} entryId={entryId} prevUserContent={prevUserContent} />
+        <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} onZoomImage={setZoomedImage} activeModel={activeModel} entryId={entryId} prevUserContent={prevUserContent} cwd={cwd} />
         {lightbox}
       </>
     );
@@ -319,7 +405,7 @@ export function MessageView({ message, isStreaming, toolResults, modelNames, ent
   return null;
 }
 
-function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, onZoomImage }: {
+function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, onZoomImage, cwd }: {
   message: UserMessage;
   entryId?: string;
   onFork?: (entryId: string) => void;
@@ -328,6 +414,7 @@ function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAs
   prevAssistantEntryId?: string;
   onEditContent?: (content: string) => void;
   onZoomImage?: (src: string) => void;
+  cwd?: string | null;
 }) {
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -409,7 +496,7 @@ function UserMessageView({ message, entryId, onFork, forking, onNavigate, prevAs
             </div>
           )}
           {cleanText}
-          <AttachmentChips attachments={attachments} />
+          <AttachmentChips attachments={attachments} cwd={cwd} />
         </div>
 
       </div>
@@ -536,6 +623,7 @@ function AssistantMessageView({
   activeModel,
   entryId,
   prevUserContent,
+  cwd,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -547,6 +635,7 @@ function AssistantMessageView({
   activeModel?: { provider: string; modelId: string } | null;
   entryId?: string;
   prevUserContent?: string;
+  cwd?: string | null;
 }) {
   const time = showTimestamp ? formatTime(message.timestamp) : null;
   const [voiceSettings, setVoiceSettings] = useState<{
@@ -766,7 +855,7 @@ function AssistantMessageView({
                 待播报文本 (Speech prompt text):
               </div>
               <div style={{ whiteSpace: "pre-wrap", color: "var(--text-muted)", fontSize: 12.5 }}>{fallbackCleanText}</div>
-              <AttachmentChips attachments={fallbackAttachments} />
+              <AttachmentChips attachments={fallbackAttachments} cwd={cwd} />
             </div>
           );
         })()}
